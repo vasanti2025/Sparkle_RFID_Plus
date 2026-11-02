@@ -1,0 +1,38 @@
+---
+description: Jewellery counter visual and interaction guidelines for Sparkle RFID Plus
+alwaysApply: true
+---
+
+# Jewellery counter UX
+
+Follow this on every screen. Use `AppColors`, `AppTypography`, and Inter from `AppTheme`. Do not introduce new brand hex codes or another font.
+
+## Identity
+
+- Font is Inter. Body text and input content are 16sp. The sign-in title is 32sp. Other screen headings are 24–28sp. Labels are 14sp and stay legible when the system text size is scaled. The sign-in header keeps both face login and help.
+- Logo stays the white-and-gold mark on a black surface. Do not recolor it.
+- Work areas use warm work surface `#F4F3F7`. Actions use charcoal `#20201F`. Accents use champagne `#E6C477` and gold text `#866526`.
+- Gold guides attention. Do not fill every control with gold.
+
+## Sign-in
+
+- Keep username and password labels above the inputs. No extra password tab and no large decorative gradient.
+- Password visibility, recovery, and support stay visible.
+- "Remember me" stores the username only. Never store a raw password.
+- Custom API lives in Connection settings, with validation and restricted access.
+- Add biometric sign-in only when the device has secure, enrolled authentication.
+
+## Scanner and layout
+
+- Touch targets are at least 48×48dp. The main action is 56dp high.
+- Inventory and Search stay in the first view. Pair icons with text.
+- Keep Sample in and Sample out visually distinct.
+- Use Android system bars and back behaviour. Do not build an iPhone-style shell.
+- Check the smallest handheld width, large text, and one-handed use.
+
+## Status
+
+- Reader ready, reader unavailable, and sync state come from the real device and backend.
+- A scan is not a completed transaction. Keep scan, exception review, confirm, and sync separate.
+- Signal feedback is guidance, never an exact distance. The physical item still has to be verified.
+- Do not invent inventory totals, sync success, or connectivity.
