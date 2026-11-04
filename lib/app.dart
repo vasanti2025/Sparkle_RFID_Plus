@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'core/constants/app_strings.dart';
 import 'core/theme/app_theme.dart';
+import 'features/products/presentation/widgets/product_sync_banner.dart';
 import 'features/splash/presentation/pages/splash_page.dart';
 
 class SparkleRfidPlusApp extends StatelessWidget {
@@ -13,6 +14,11 @@ class SparkleRfidPlusApp extends StatelessWidget {
       title: AppStrings.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
+      builder: (context, child) {
+        return Stack(
+          children: [?child, const ProductSyncBanner()],
+        );
+      },
       home: const SplashPage(),
     );
   }

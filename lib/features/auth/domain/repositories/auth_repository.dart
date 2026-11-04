@@ -7,4 +7,10 @@ abstract class AuthRepository {
     required String password,
     required bool rememberMe,
   });
+
+  Future<String?> rememberedUsername();
+
+  Future<User?> restoreSession();
+
+  Future<void> signOut();
 }
