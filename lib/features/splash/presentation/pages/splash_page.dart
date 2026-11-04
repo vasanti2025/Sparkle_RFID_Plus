@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
@@ -20,6 +21,7 @@ class _SplashPageState extends State<SplashPage> {
     super.initState();
     Future<void>.delayed(AppConstants.splashDuration, () {
       if (!mounted) return;
+      SystemChrome.setSystemUIOverlayStyle(_lightScreenOverlay);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => const LoginPage()),
       );
@@ -28,10 +30,11 @@ class _SplashPageState extends State<SplashPage> {
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(
-      color: AppColors.black,
-      child: SafeArea(
-        child: _SplashBody(),
+    return const AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _splashOverlay,
+      child: ColoredBox(
+        color: AppColors.black,
+        child: SafeArea(child: _SplashBody()),
       ),
     );
   }
@@ -123,6 +126,22 @@ class _SplashBody extends StatelessWidget {
     );
   }
 }
+
+const _splashOverlay = SystemUiOverlayStyle(
+  statusBarColor: Color(0x00000000),
+  statusBarIconBrightness: Brightness.light,
+  statusBarBrightness: Brightness.dark,
+  systemNavigationBarColor: AppColors.black,
+  systemNavigationBarIconBrightness: Brightness.light,
+);
+
+const _lightScreenOverlay = SystemUiOverlayStyle(
+  statusBarColor: Color(0x00000000),
+  statusBarIconBrightness: Brightness.dark,
+  statusBarBrightness: Brightness.light,
+  systemNavigationBarColor: AppColors.white,
+  systemNavigationBarIconBrightness: Brightness.dark,
+);
 
 class _SplashRingsPainter extends CustomPainter {
   const _SplashRingsPainter();

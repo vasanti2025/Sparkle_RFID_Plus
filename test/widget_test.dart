@@ -6,6 +6,6 @@ void main() {
   testWidgets('Splash opens', (tester) async {
     await tester.pumpWidget(const SparkleRfidPlusApp());
     expect(find.text(AppStrings.everyPieceMatters), findsOneWidget);
-    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.pump(const Duration(seconds: 1));
   });
 }

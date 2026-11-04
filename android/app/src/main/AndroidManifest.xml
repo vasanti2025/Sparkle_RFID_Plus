@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="sparkle_rfid_plus"
+        android:label="RFID"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

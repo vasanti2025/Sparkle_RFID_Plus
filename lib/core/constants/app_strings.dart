@@ -1,6 +1,6 @@
 /// User-facing copy. Screens read text from here.
 abstract final class AppStrings {
-  static const appName = 'Sparkle RFID Plus';
+  static const appName = 'RFID';
 
   static const everyPieceMatters = 'Every piece matters.';
   static const makeEveryMomentCount = 'Make every moment count.';
