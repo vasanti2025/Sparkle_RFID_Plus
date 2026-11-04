@@ -1,3 +1,5 @@
+import '../../../../core/constants/app_strings.dart';
+import '../../../../core/error/failures.dart';
 import '../../../../core/usecases/usecase.dart';
 import '../../../../core/utils/result.dart';
 import '../entities/user.dart';
@@ -22,6 +24,16 @@ class Login implements UseCase<User, LoginParams> {
 
   @override
   Future<Result<User>> call(LoginParams params) {
+    if (params.username.isEmpty) {
+      return Future.value(
+        const Error(ValidationFailure(AppStrings.usernameRequired)),
+      );
+    }
+    if (params.password.isEmpty) {
+      return Future.value(
+        const Error(ValidationFailure(AppStrings.passwordRequired)),
+      );
+    }
     return repository.login(
       username: params.username,
       password: params.password,

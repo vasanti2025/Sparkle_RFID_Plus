@@ -26,10 +26,11 @@ class AuthRepositoryImpl implements AuthRepository {
         username: username,
         password: password,
       );
+      await localDataSource.saveSession(user);
       if (rememberMe) {
-        await localDataSource.cacheUser(user);
+        await localDataSource.saveRememberedUsername(username);
       } else {
-        await localDataSource.clear();
+        await localDataSource.clearRememberedUsername();
       }
       return Success(user);
     } on ServerException catch (error) {
@@ -39,5 +40,20 @@ class AuthRepositoryImpl implements AuthRepository {
     } on NetworkException catch (error) {
       return Error(NetworkFailure(error.message));
     }
+  }
+
+  @override
+  Future<String?> rememberedUsername() {
+    return localDataSource.readRememberedUsername();
+  }
+
+  @override
+  Future<User?> restoreSession() {
+    return localDataSource.readSession();
+  }
+
+  @override
+  Future<void> signOut() {
+    return localDataSource.clearSession();
   }
 }

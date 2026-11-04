@@ -12,6 +12,7 @@ abstract final class AppColors {
   static const logoPlate = Color(0xFF111111);
   static const muted = Color(0xFF6D6B66);
   static const fieldBorder = Color(0xFFDCD8D0);
+  static const error = Color(0xFF9B3A3A);
   static const splashBody = Color(0xFFD9D6CE);
   static const splashMuted = Color(0xFF96938C);
 

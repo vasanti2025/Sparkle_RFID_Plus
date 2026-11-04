@@ -8,6 +8,12 @@ import '../../../../core/theme/app_typography.dart';
 import '../../../quotation/presentation/pages/pos_quotation_page.dart';
 import '../../../quotation/presentation/pages/sparkle_quotation_page.dart';
 import '../../../settings/presentation/pages/settings_page.dart';
+import '../../../find/presentation/pages/find_jewellery_page.dart';
+import '../../../inventory/presentation/pages/inventory_page.dart';
+import '../../../orders/presentation/pages/orders_page.dart';
+import '../../../products/presentation/pages/products_page.dart';
+import '../../../tools/presentation/workspace_flow.dart';
+import '../../../transfers/presentation/pages/transfer_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,7 +22,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final List<CurvedAnimation> _reveals;
   var _tab = 0;
@@ -152,10 +159,17 @@ class _HomeHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(AppStrings.brandName, style: _text(size: 12, weight: FontWeight.w700)),
+              Text(
+                AppStrings.brandName,
+                style: _text(size: 12, weight: FontWeight.w700),
+              ),
               Text(
                 AppStrings.home,
-                style: _text(size: AppTypography.heading, weight: FontWeight.w700, height: 1.1),
+                style: _text(
+                  size: AppTypography.heading,
+                  weight: FontWeight.w700,
+                  height: 1.1,
+                ),
               ),
             ],
           ),
@@ -164,8 +178,8 @@ class _HomeHeader extends StatelessWidget {
           width: AppTypography.minTouch,
           height: AppTypography.minTouch,
           child: IconButton(
-            onPressed: () {},
-            tooltip: AppStrings.account,
+            onPressed: () => showAccountSheet(context),
+            tooltip: AppStrings.yourAccount,
             icon: Container(
               width: 40,
               height: 40,
@@ -174,7 +188,11 @@ class _HomeHeader extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.fieldBorder),
               ),
-              child: const Icon(Icons.person_outline, size: 22, color: AppColors.charcoal),
+              child: const Icon(
+                Icons.person_outline,
+                size: 22,
+                color: AppColors.charcoal,
+              ),
             ),
             constraints: const BoxConstraints(
               minWidth: AppTypography.minTouch,
@@ -194,11 +212,19 @@ class _ReaderStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.wifi_tethering, size: 15, color: AppColors.statusReady),
+        const Icon(
+          Icons.wifi_tethering,
+          size: 15,
+          color: AppColors.statusReady,
+        ),
         const SizedBox(width: 6),
         Text(
           AppStrings.readerReady,
-          style: _text(size: AppTypography.label, weight: FontWeight.w600, color: AppColors.statusReady),
+          style: _text(
+            size: AppTypography.label,
+            weight: FontWeight.w600,
+            color: AppColors.statusReady,
+          ),
         ),
         const Spacer(),
         Text(
@@ -227,7 +253,11 @@ class _PrimaryActions extends StatelessWidget {
             titleColor: AppColors.white,
             subtitle: AppStrings.checkStockHint,
             subtitleColor: AppColors.white.withValues(alpha: 0.72),
-            onTap: () {},
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const InventoryPage()),
+              );
+            },
           ),
         ),
         const SizedBox(width: 12),
@@ -240,7 +270,7 @@ class _PrimaryActions extends StatelessWidget {
             titleColor: AppColors.charcoal,
             subtitle: AppStrings.findJewelleryHint,
             subtitleColor: AppColors.muted,
-            onTap: () {},
+            onTap: () => showFindJewellery(context),
           ),
         ),
       ],
@@ -291,12 +321,20 @@ class _ActionCard extends StatelessWidget {
                 const SizedBox(height: 28),
                 Text(
                   title,
-                  style: _text(size: 18, weight: FontWeight.w700, color: titleColor),
+                  style: _text(
+                    size: 18,
+                    weight: FontWeight.w700,
+                    color: titleColor,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: _text(size: AppTypography.label, color: subtitleColor, height: 1.3),
+                  style: _text(
+                    size: AppTypography.label,
+                    color: subtitleColor,
+                    height: 1.3,
+                  ),
                 ),
               ],
             ),
@@ -320,7 +358,9 @@ class _ProductsRow extends StatelessWidget {
       color: AppColors.white,
       shape: shape,
       child: InkWell(
-        onTap: () {},
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const ProductsPage()),
+        ),
         customBorder: shape,
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 72),
@@ -328,7 +368,11 @@ class _ProductsRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
               children: [
-                const Icon(Icons.diamond_outlined, color: AppColors.goldText, size: 26),
+                const Icon(
+                  Icons.diamond_outlined,
+                  color: AppColors.goldText,
+                  size: 26,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -336,11 +380,17 @@ class _ProductsRow extends StatelessWidget {
                     children: [
                       Text(
                         AppStrings.products,
-                        style: _text(size: AppTypography.body, weight: FontWeight.w700),
+                        style: _text(
+                          size: AppTypography.body,
+                          weight: FontWeight.w700,
+                        ),
                       ),
                       Text(
                         AppStrings.productsHint,
-                        style: _text(size: AppTypography.label, color: AppColors.muted),
+                        style: _text(
+                          size: AppTypography.label,
+                          color: AppColors.muted,
+                        ),
                       ),
                     ],
                   ),
@@ -412,7 +462,7 @@ class _ToolGrid extends StatelessWidget {
           color: AppColors.white,
           shape: shape,
           child: InkWell(
-            onTap: label == AppStrings.quotations ? onQuotations : () {},
+            onTap: () => _openTool(context, label),
             customBorder: shape,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -422,7 +472,10 @@ class _ToolGrid extends StatelessWidget {
                 Text(
                   label,
                   textAlign: TextAlign.center,
-                  style: _text(size: AppTypography.label, weight: FontWeight.w600),
+                  style: _text(
+                    size: AppTypography.label,
+                    weight: FontWeight.w600,
+                  ),
                 ),
               ],
             ),
@@ -445,6 +498,7 @@ class _MoveActions extends StatelessWidget {
             label: AppStrings.sampleIn,
             background: AppColors.chipSurface,
             foreground: AppColors.charcoal,
+            onTap: () => showModulePreview(context, AppStrings.sampleIn),
           ),
         ),
         const SizedBox(width: 10),
@@ -453,6 +507,7 @@ class _MoveActions extends StatelessWidget {
             label: AppStrings.sampleOut,
             background: AppColors.chipSurface,
             foreground: AppColors.charcoal,
+            onTap: () => showModulePreview(context, AppStrings.sampleOut),
           ),
         ),
         const SizedBox(width: 10),
@@ -461,6 +516,7 @@ class _MoveActions extends StatelessWidget {
             label: AppStrings.allTools,
             background: AppColors.chipSurface,
             foreground: AppColors.charcoal,
+            onTap: () => showAllTools(context),
           ),
         ),
       ],
@@ -473,11 +529,13 @@ class _MoveButton extends StatelessWidget {
     required this.label,
     required this.background,
     required this.foreground,
+    required this.onTap,
   });
 
   final String label;
   final Color background;
   final Color foreground;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -485,19 +543,21 @@ class _MoveButton extends StatelessWidget {
       color: background,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () {},
+        onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Container(
           constraints: const BoxConstraints(minHeight: AppTypography.minTouch),
           alignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(16)),
           child: Text(
             label,
             textAlign: TextAlign.center,
-            style: _text(size: AppTypography.label, weight: FontWeight.w600, color: foreground),
+            style: _text(
+              size: AppTypography.label,
+              weight: FontWeight.w600,
+              color: foreground,
+            ),
           ),
         ),
       ),
@@ -545,6 +605,17 @@ class _HomeNavigation extends StatelessWidget {
         selectedIndex: selectedIndex,
         onDestinationSelected: onSelected,
         height: 64,
+        onDestinationSelected: (index) {
+          if (index == 1) {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const ProductsPage()),
+            );
+          } else if (index == 2) {
+            showAllTools(context);
+          } else if (index == 3) {
+            showSettingsSheet(context);
+          }
+        },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [
           NavigationDestination(
@@ -567,6 +638,21 @@ class _HomeNavigation extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+void _openTool(BuildContext context, String label) {
+  switch (label) {
+    case AppStrings.orders:
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const OrdersPage()),
+      );
+    case AppStrings.transfers:
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const TransferPage()),
+      );
+    default:
+      showModulePreview(context, label);
   }
 }
 

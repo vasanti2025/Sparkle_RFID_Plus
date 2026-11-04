@@ -19,4 +19,9 @@ abstract final class AppConstants {
   static const qaUserId = '3766';
   static const qaToken =
       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJNdWtlc2giLCJqdGkiOiI2Yzk5OGI1ZS0wMmQ4LTQwOGUtYTA0MC1lMmJiZWI3NmMwYTYiLCJDbGllbnRDb2RlIjoiTFMwMDA1ODAiLCJleHAiOjE3OTM4MjAxNDgsImlzcyI6Ijk4Nzk4ODc2NzU3NjU2NjU0NjU0IiwiYXVkIjoiSW5mb0Bsb3lhbHN0cmluZy5jb20ifQ.uFo83-l0jC0D7un1M22FJ7YVIlhMkNp0lEtYNrK2Bdg';
+  static const apiBaseUrl = 'https://rrgold.loyalstring.co.in/';
+  static const loginPath = 'api/ClientOnboarding/ClientOnboardingLogin';
+  static const rfidSyncPath = 'api/ProductMaster/GetAllRFID';
+  static const productSyncPath =
+      'api/ProductMaster/branch-labelled-stocks/search';
 }
