@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/asset_paths.dart';
+import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
+import '../../../quotation/presentation/pages/pos_quotation_page.dart';
+import '../../../quotation/presentation/pages/sparkle_quotation_page.dart';
+import '../../../settings/presentation/pages/settings_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -15,6 +19,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final List<CurvedAnimation> _reveals;
+  var _tab = 0;
 
   @override
   void initState() {
@@ -78,32 +83,49 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       body: SafeArea(
         child: Column(
           children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _reveal(0, const _HomeHeader()),
-                    const SizedBox(height: 16),
-                    _reveal(1, const _ReaderStatus()),
-                    const SizedBox(height: 16),
-                    _reveal(2, const _PrimaryActions()),
-                    const SizedBox(height: 12),
-                    _reveal(3, const _ProductsRow()),
-                    const SizedBox(height: 20),
-                    _reveal(4, const _SectionTitle()),
-                    const SizedBox(height: 12),
-                    _reveal(5, const _ToolGrid()),
-                    const SizedBox(height: 12),
-                    _reveal(6, const _MoveActions()),
-                  ],
-                ),
-              ),
+            Expanded(child: _tab == 3 ? const SettingsPage() : _homeBody()),
+            _HomeNavigation(
+              selectedIndex: _tab,
+              onSelected: (index) => setState(() => _tab = index),
             ),
-            _reveal(7, const _HomeNavigation()),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _homeBody() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _reveal(0, const _HomeHeader()),
+          const SizedBox(height: 16),
+          _reveal(1, const _ReaderStatus()),
+          const SizedBox(height: 16),
+          _reveal(2, const _PrimaryActions()),
+          const SizedBox(height: 12),
+          _reveal(3, const _ProductsRow()),
+          const SizedBox(height: 20),
+          _reveal(4, const _SectionTitle()),
+          const SizedBox(height: 12),
+          _reveal(
+            5,
+            _ToolGrid(
+              onQuotations: () {
+                final page = Injection.settings.enablePos
+                    ? const PosQuotationPage()
+                    : const SparkleQuotationPage();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => page),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          _reveal(6, const _MoveActions()),
+        ],
       ),
     );
   }
@@ -355,7 +377,9 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _ToolGrid extends StatelessWidget {
-  const _ToolGrid();
+  const _ToolGrid({required this.onQuotations});
+
+  final VoidCallback onQuotations;
 
   static const _tools = <(String, IconData)>[
     (AppStrings.orders, Icons.receipt_long_outlined),
@@ -388,7 +412,7 @@ class _ToolGrid extends StatelessWidget {
           color: AppColors.white,
           shape: shape,
           child: InkWell(
-            onTap: () {},
+            onTap: label == AppStrings.quotations ? onQuotations : () {},
             customBorder: shape,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -482,7 +506,13 @@ class _MoveButton extends StatelessWidget {
 }
 
 class _HomeNavigation extends StatelessWidget {
-  const _HomeNavigation();
+  const _HomeNavigation({
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -512,7 +542,8 @@ class _HomeNavigation extends StatelessWidget {
         }),
       ),
       child: NavigationBar(
-        selectedIndex: 0,
+        selectedIndex: selectedIndex,
+        onDestinationSelected: onSelected,
         height: 64,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [

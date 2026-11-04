@@ -50,6 +50,21 @@ abstract final class AppStrings {
   static const tools = 'Tools';
   static const settings = 'Settings';
   static const account = 'Account';
+  static const enablePos = 'Enable POS';
+  static const enablePosHint =
+      'On uses the POS quotation screen. Off uses the Sparkle quotation screen.';
+  static const clientCode = 'Client code';
+  static const userId = 'User id';
+  static const connectionForQa = 'QA connection';
+  static const newQuotation = 'New quotation';
+  static const chooseCustomer = 'Choose customer';
+  static const addCustomer = 'Add customer';
+  static const customer = 'Customer';
+  static const rfidOrItemCode = 'RFID or item code';
+  static const selectedJewellery = 'Selected jewellery';
+  static const noPiecesYet = 'Start with the jewellery.';
+  static const scanOrSelect = 'Scan tagged pieces or select item codes.';
+  static const reviewQuotation = 'Review quotation';
 
   static const signedIn = 'Signed in';
   static const usernameAndPasswordRequired =
