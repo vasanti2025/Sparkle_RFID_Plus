@@ -2,11 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/asset_paths.dart';
-import '../../../../core/di/injection.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
-import '../../../quotation/presentation/pages/pos_quotation_page.dart';
-import '../../../quotation/presentation/pages/sparkle_quotation_page.dart';
+import '../../../quotation/presentation/pages/quotation_list_page.dart';
 import '../../../settings/presentation/pages/settings_page.dart';
 import '../../../find/presentation/pages/find_jewellery_page.dart';
 import '../../../inventory/presentation/pages/inventory_page.dart';
@@ -121,11 +119,8 @@ class _HomePageState extends State<HomePage>
             5,
             _ToolGrid(
               onQuotations: () {
-                final page = Injection.settings.enablePos
-                    ? const PosQuotationPage()
-                    : const SparkleQuotationPage();
                 Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => page),
+                  MaterialPageRoute<void>(builder: (_) => const QuotationListPage()),
                 );
               },
             ),
@@ -461,8 +456,14 @@ class _ToolGrid extends StatelessWidget {
         return Material(
           color: AppColors.white,
           shape: shape,
-          child: InkWell(
-            onTap: () => _openTool(context, label),
+            child: InkWell(
+              onTap: () {
+                if (label == AppStrings.quotations) {
+                  onQuotations();
+                  return;
+                }
+                _openTool(context, label);
+              },
             customBorder: shape,
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -603,18 +604,19 @@ class _HomeNavigation extends StatelessWidget {
       ),
       child: NavigationBar(
         selectedIndex: selectedIndex,
-        onDestinationSelected: onSelected,
         height: 64,
         onDestinationSelected: (index) {
           if (index == 1) {
             Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const ProductsPage()),
             );
-          } else if (index == 2) {
-            showAllTools(context);
-          } else if (index == 3) {
-            showSettingsSheet(context);
+            return;
           }
+          if (index == 2) {
+            showAllTools(context);
+            return;
+          }
+          onSelected(index);
         },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: const [

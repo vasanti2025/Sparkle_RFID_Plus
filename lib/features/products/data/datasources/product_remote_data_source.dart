@@ -23,7 +23,7 @@ class ProductRemoteDataSourceImpl implements ProductRemoteDataSource {
           dio ??
           Dio(
             BaseOptions(
-              baseUrl: AppConstants.apiBaseUrl,
+              baseUrl: AppConstants.qaBaseUrl,
               connectTimeout: const Duration(seconds: 60),
               receiveTimeout: const Duration(minutes: 10),
               sendTimeout: const Duration(minutes: 2),

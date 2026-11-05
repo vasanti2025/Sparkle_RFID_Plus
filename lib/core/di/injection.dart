@@ -28,6 +28,7 @@ import '../../features/products/presentation/product_sync_controller.dart';
 class Injection {
   Injection._();
 
+  static bool ready = false;
   static late final Login login;
   static late final SettingsController settings;
   static late final QuotationRepository quotations;

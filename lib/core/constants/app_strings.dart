@@ -222,9 +222,6 @@ abstract final class AppStrings {
   static const enablePos = 'Enable POS';
   static const enablePosHint =
       'On uses the POS quotation screen. Off uses the Sparkle quotation screen.';
-  static const clientCode = 'Client code';
-  static const userId = 'User id';
-  static const connectionForQa = 'QA connection';
   static const newQuotation = 'New quotation';
   static const chooseCustomer = 'Choose customer';
   static const addCustomer = 'Add customer';
@@ -494,11 +491,10 @@ abstract final class AppStrings {
   static const unsavedChanges = 'UNSAVED CHANGES';
   static const capturingPieces = 'CAPTURING PIECES';
   static const customerLabel = 'CUSTOMER';
-  static const chooseCustomer = 'Choose customer';
   static const orderDetails = 'Order details';
   static const piecesInOrder = 'PIECES IN THIS ORDER';
   static const addTheJewellery = 'Add the jewellery.';
-  static const scanOrSelect =
+  static const orderScanOrSelect =
       'Scan tagged pieces or select an item code. Each piece is added once.';
   static const addAnotherPiece = 'Add another piece';
   static const fwWeight = 'F+W weight';
@@ -516,7 +512,6 @@ abstract final class AppStrings {
   static const keepEditing = 'Keep editing';
   static const discardChanges = 'Discard changes';
   static const customerName = 'Customer name';
-  static const addCustomer = 'Add customer';
   static const useCustomer = 'Use customer';
   static const enterCustomerName = 'Enter the customer name.';
   static const addsNameDemo = 'Adds a name to this demo only.';

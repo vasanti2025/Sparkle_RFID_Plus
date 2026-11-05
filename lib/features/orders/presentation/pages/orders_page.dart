@@ -554,7 +554,7 @@ class _OrdersPageState extends State<OrdersPage> {
               ),
               const SizedBox(height: 8),
               if (draft.items.isEmpty)
-                _empty(AppStrings.addTheJewellery, AppStrings.scanOrSelect)
+                _empty(AppStrings.addTheJewellery, AppStrings.orderScanOrSelect)
               else
                 for (final piece in draft.items) _pieceCard(piece),
               TextButton.icon(

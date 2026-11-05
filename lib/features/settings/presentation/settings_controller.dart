@@ -21,16 +21,4 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
     await _repository.save(preferences);
   }
-
-  Future<void> setConnection({
-    required String clientCode,
-    required String userId,
-  }) async {
-    preferences = preferences.copyWith(
-      clientCode: clientCode.trim(),
-      userId: userId.trim(),
-    );
-    notifyListeners();
-    await _repository.save(preferences);
-  }
 }

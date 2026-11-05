@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/utils/result.dart';
@@ -94,6 +95,11 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     switch (result) {
       case Success(:final data):
+        AppSession.apply(
+          clientCode: data.clientCode,
+          userId: data.id,
+          token: data.token,
+        );
         final notice = data.notice;
         if (notice != null && notice.isNotEmpty) {
           ScaffoldMessenger.of(

@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/di/injection.dart';
+import '../../../core/session/app_session.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../auth/presentation/pages/login_page.dart';
 import '../../find/presentation/pages/find_jewellery_page.dart';
 import '../../inventory/presentation/pages/inventory_page.dart';
 import '../../orders/presentation/pages/orders_page.dart';
 import '../../products/presentation/pages/products_page.dart';
+import '../../quotation/presentation/pages/quotation_list_page.dart';
 import '../../transfers/presentation/pages/transfer_page.dart';
 
 class WorkspaceModule {
@@ -64,6 +66,8 @@ void openSparkleModule(BuildContext context, String module, {bool replaceSheet =
       openSheet(showFindJewellery);
     case AppStrings.orders:
       openPage(const OrdersPage());
+    case AppStrings.quotations:
+      openPage(const QuotationListPage());
     case AppStrings.transfers:
     case AppStrings.stockTransfer:
       openPage(const TransferPage());
@@ -394,6 +398,7 @@ Future<void> _signOut(BuildContext context) async {
     await Injection.signOut();
     Injection.productSync.abandon();
   }
+  AppSession.clear();
   if (!navigator.mounted) return;
   navigator.pushAndRemoveUntil(
     MaterialPageRoute<void>(builder: (_) => const LoginPage()),

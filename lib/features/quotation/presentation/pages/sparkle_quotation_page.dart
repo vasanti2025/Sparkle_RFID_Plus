@@ -5,16 +5,21 @@ import 'package:flutter/material.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/utils/result.dart';
 import '../../domain/entities/customer_record.dart';
+import '../../domain/entities/quotation_detail.dart';
 import '../../domain/entities/quotation_draft.dart';
 import '../../domain/entities/stock_item.dart';
 import '../widgets/stock_picker_sheet.dart';
+import 'add_customer_page.dart';
 
 class SparkleQuotationPage extends StatefulWidget {
-  const SparkleQuotationPage({super.key});
+  const SparkleQuotationPage({super.key, this.detail});
+
+  final QuotationDetail? detail;
 
   @override
   State<SparkleQuotationPage> createState() => _SparkleQuotationPageState();
@@ -22,6 +27,9 @@ class SparkleQuotationPage extends StatefulWidget {
 
 class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   final TextEditingController _lookup = TextEditingController();
+  final TextEditingController _branch = TextEditingController();
+  final TextEditingController _reference = TextEditingController();
+  final TextEditingController _notes = TextEditingController();
   CustomerIndex _customers = CustomerIndex(const []);
   CustomerRecord? _customer;
   final List<StockItem> _items = [];
@@ -29,12 +37,29 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   var _searchToken = 0;
   List<StockItem> _suggestions = const [];
   var _loadingCustomers = false;
+  var _saving = false;
+  late DateTime _docDate;
+  late DateTime _validUntil;
+  int _quotationId = 0;
+  String _quotationNo = '';
+  Map<String, dynamic> _source = const {};
 
-  String get _clientCode => AppConstants.qaClientCode;
+  String get _clientCode => AppSession.clientCode;
 
   @override
   void initState() {
     super.initState();
+    final today = DateTime.now();
+    _docDate = DateTime(today.year, today.month, today.day);
+    _validUntil = _docDate.add(const Duration(days: 7));
+    final detail = widget.detail;
+    if (detail != null) {
+      _quotationId = detail.id;
+      _quotationNo = detail.number;
+      _source = detail.source;
+      _customer = detail.customer;
+      _items.addAll(detail.items);
+    }
     _loadCustomers();
   }
 
@@ -42,6 +67,9 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   void dispose() {
     _debounce?.cancel();
     _lookup.dispose();
+    _branch.dispose();
+    _reference.dispose();
+    _notes.dispose();
     super.dispose();
   }
 
@@ -169,7 +197,11 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                   onTap: _chooseCustomer,
                 ),
                 const SizedBox(height: 10),
-                const _DetailsRow(),
+                _DetailsLink(
+                  branch: _branch.text,
+                  validUntil: _validUntil,
+                  onTap: _editDetails,
+                ),
                 const SizedBox(height: 14),
                 Row(
                   children: [
@@ -225,6 +257,13 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                       item: item,
                       onRemove: () => setState(() => _items.remove(item)),
                     ),
+                const SizedBox(height: 12),
+                const _PricePending(),
+                const SizedBox(height: 8),
+                const Text(
+                  'A price proposal. It does not move stock.',
+                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                ),
               ],
             ),
           ),
@@ -254,6 +293,90 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
     if (selected != null) setState(() => _customer = selected);
   }
 
+  Future<void> _editDetails() async {
+    final branch = TextEditingController(text: _branch.text);
+    final reference = TextEditingController(text: _reference.text);
+    final notes = TextEditingController(text: _notes.text);
+    var docDate = _docDate;
+    var validUntil = _validUntil;
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheet) {
+            return Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Document details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 12),
+                  TextField(controller: branch, decoration: const InputDecoration(labelText: 'Branch')),
+                  TextField(
+                    readOnly: true,
+                    decoration: InputDecoration(labelText: 'Document date', hintText: _formatDate(docDate)),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2100),
+                        initialDate: docDate,
+                      );
+                      if (picked != null) setSheet(() => docDate = picked);
+                    },
+                  ),
+                  TextField(
+                    readOnly: true,
+                    decoration: InputDecoration(labelText: 'Valid until', hintText: _formatDate(validUntil)),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2100),
+                        initialDate: validUntil,
+                      );
+                      if (picked != null) setSheet(() => validUntil = picked);
+                    },
+                  ),
+                  TextField(controller: reference, decoration: const InputDecoration(labelText: 'Reference')),
+                  TextField(controller: notes, decoration: const InputDecoration(labelText: 'Notes')),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: AppColors.charcoal),
+                    onPressed: () {
+                      if (validUntil.isBefore(docDate)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Valid-until date cannot be before the document date.')),
+                        );
+                        return;
+                      }
+                      Navigator.pop(context, true);
+                    },
+                    child: const Text('Apply details'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (saved == true && mounted) {
+      setState(() {
+        _branch.text = branch.text.trim();
+        _reference.text = reference.text.trim();
+        _notes.text = notes.text.trim();
+        _docDate = docDate;
+        _validUntil = validUntil;
+      });
+    }
+    branch.dispose();
+    reference.dispose();
+    notes.dispose();
+  }
+
   void _review() {
     if (_customer == null || _items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -261,16 +384,107 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       );
       return;
     }
-    Injection.quotations.saveDraft(
-      QuotationDraft(
-        customerName: _customer!.name,
-        items: List<StockItem>.from(_items),
-        posMode: false,
-        createdAt: DateTime.now(),
-      ),
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Review quotation', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 12),
+              _reviewLine('Customer', _customer!.name),
+              _reviewLine('Branch', _branch.text.isEmpty ? 'Not set' : _branch.text),
+              _reviewLine('Valid until', _formatDate(_validUntil)),
+              _reviewLine('Pieces / gross', '${_items.length} / ${_gross.toStringAsFixed(3)} g'),
+              const SizedBox(height: 8),
+              const _PricePending(),
+              const SizedBox(height: 8),
+              const Text(
+                'A price proposal. It does not move stock.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: AppColors.charcoal),
+                onPressed: _saving ? null : _saveQuotation,
+                child: Text(_quotationId > 0 ? 'Update' : 'Save'),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Draft only. No stock or order is changed.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+            ],
+          ),
+        );
+      },
     );
-    Navigator.pop(context, true);
   }
+
+  Future<void> _saveQuotation() async {
+    final customer = _customer;
+    if (customer == null || _items.isEmpty || _saving) return;
+    final editing = _quotationId > 0;
+    setState(() => _saving = true);
+    final result = await Injection.quotations.saveQuotation(
+      clientCode: _clientCode,
+      customer: customer,
+      items: List<StockItem>.from(_items),
+      gstApplied: false,
+      gstRate: 0,
+      id: _quotationId,
+      number: _quotationNo,
+      source: _source,
+    );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    switch (result) {
+      case Success(:final data):
+        Injection.quotations.rememberQuotationCustomer(
+          number: data,
+          customerName: customer.name,
+        );
+        Injection.quotations.saveDraft(
+          QuotationDraft(
+            customerName: customer.name,
+            items: List<StockItem>.from(_items),
+            posMode: false,
+            createdAt: DateTime.now(),
+          ),
+        );
+        if (!mounted) return;
+        Navigator.pop(context);
+        Navigator.pop(
+          context,
+          editing
+              ? 'Quotation updated successfully'
+              : (data.isEmpty ? 'Quotation saved' : 'Quotation $data saved'),
+        );
+      case Error(:final failure):
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failure.message)));
+    }
+  }
+}
+
+Widget _reviewLine(String label, String value) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      children: [
+        Expanded(child: Text(label, style: const TextStyle(color: AppColors.muted))),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
+      ],
+    ),
+  );
+}
+
+String _formatDate(DateTime date) {
+  return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
 }
 
 class _CustomerChooser extends StatelessWidget {
@@ -302,17 +516,15 @@ class _CustomerChooser extends StatelessWidget {
               const Icon(Icons.person_outline, color: AppColors.goldText),
               const SizedBox(width: 12),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('CUSTOMER', style: TextStyle(fontSize: 11, color: AppColors.muted)),
-                    Text(
-                      loading
-                          ? 'Loading customers'
-                          : customer?.name ?? AppStrings.chooseCustomer,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-                    ),
-                  ],
+                child: Text(
+                  loading
+                      ? 'Select customer'
+                      : (customer != null && customer!.name.isNotEmpty
+                            ? customer!.name
+                            : 'Select customer'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
               const Icon(Icons.expand_more, color: AppColors.muted),
@@ -324,18 +536,67 @@ class _CustomerChooser extends StatelessWidget {
   }
 }
 
-class _DetailsRow extends StatelessWidget {
-  const _DetailsRow();
+class _DetailsLink extends StatelessWidget {
+  const _DetailsLink({
+    required this.branch,
+    required this.validUntil,
+    required this.onTap,
+  });
+
+  final String branch;
+  final DateTime validUntil;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final today = DateTime.now();
-    final date = '${today.day.toString().padLeft(2, '0')}/${today.month.toString().padLeft(2, '0')}/${today.year}';
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: const Text('Branch', style: TextStyle(fontWeight: FontWeight.w700)),
-      subtitle: Text('Date · $date'),
-      trailing: const Icon(Icons.tune, color: AppColors.goldText),
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    branch.isEmpty ? 'Branch' : branch,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  Text(
+                    'Valid until · ${_formatDate(validUntil)}',
+                    style: const TextStyle(color: AppColors.muted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const Text('Details', style: TextStyle(color: AppColors.goldText, fontWeight: FontWeight.w700)),
+            const Icon(Icons.tune, color: AppColors.goldText, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PricePending extends StatelessWidget {
+  const _PricePending();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: const Row(
+        children: [
+          Expanded(child: Text('Document amount')),
+          Text('Pricing pending', style: TextStyle(fontWeight: FontWeight.w700)),
+        ],
+      ),
     );
   }
 }
@@ -476,6 +737,11 @@ class _Footer extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              const Text(
+                'Draft only. No stock or order is changed.',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
             ],
           ),
         ),
@@ -569,82 +835,12 @@ class _CustomerSheetState extends State<_CustomerSheet> {
   }
 
   Future<void> _addCustomer(BuildContext context) async {
-    final created = await showDialog<CustomerRecord>(
-      context: context,
-      builder: (context) => _AddCustomerDialog(clientCode: widget.clientCode),
+    final created = await Navigator.push<CustomerRecord>(
+      context,
+      MaterialPageRoute(builder: (_) => const AddCustomerPage()),
     );
     if (created == null || !context.mounted) return;
     widget.onCreated(created);
     Navigator.pop(context, created);
-  }
-}
-
-class _AddCustomerDialog extends StatefulWidget {
-  const _AddCustomerDialog({required this.clientCode});
-
-  final String clientCode;
-
-  @override
-  State<_AddCustomerDialog> createState() => _AddCustomerDialogState();
-}
-
-class _AddCustomerDialogState extends State<_AddCustomerDialog> {
-  final _name = TextEditingController();
-  final _mobile = TextEditingController();
-  final _email = TextEditingController();
-  var _saving = false;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _mobile.dispose();
-    _email.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text(AppStrings.addCustomer),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Name')),
-          TextField(controller: _mobile, decoration: const InputDecoration(labelText: 'Mobile')),
-          TextField(controller: _email, decoration: const InputDecoration(labelText: 'Email')),
-        ],
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(
-          onPressed: _saving ? null : _save,
-          child: Text(_saving ? 'Saving' : 'Save'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _save() async {
-    final name = _name.text.trim();
-    if (name.isEmpty) return;
-    setState(() => _saving = true);
-    if (widget.clientCode.isNotEmpty) {
-      await Injection.quotations.addCustomer(
-        clientCode: widget.clientCode,
-        name: name,
-        mobile: _mobile.text.trim(),
-        email: _email.text.trim(),
-      );
-    }
-    if (!mounted) return;
-    Navigator.pop(
-      context,
-      CustomerRecord(
-        id: 0,
-        name: name,
-        mobile: _mobile.text.trim(),
-        email: _email.text.trim(),
-      ),
-    );
   }
 }

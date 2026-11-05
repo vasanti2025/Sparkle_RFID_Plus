@@ -15,7 +15,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
           dio ??
           Dio(
             BaseOptions(
-              baseUrl: AppConstants.apiBaseUrl,
+              baseUrl: AppConstants.qaBaseUrl,
               connectTimeout: const Duration(seconds: 25),
               receiveTimeout: const Duration(seconds: 25),
               sendTimeout: const Duration(seconds: 25),

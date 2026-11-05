@@ -7,6 +7,7 @@ import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../auth/domain/entities/user.dart';
@@ -39,6 +40,11 @@ class _SplashPageState extends State<SplashPage> {
       final user = await _restoredUser();
       if (!mounted) return;
       if (user != null) {
+        AppSession.apply(
+          clientCode: user.clientCode,
+          userId: user.id,
+          token: user.token,
+        );
         unawaited(Injection.productSync.start(user));
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(builder: (_) => const HomePage()),
