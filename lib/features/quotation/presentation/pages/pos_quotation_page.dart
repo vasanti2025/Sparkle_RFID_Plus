@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/result.dart';
@@ -33,6 +34,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   final List<StockItem> _items = [];
   var _loading = true;
   var _saving = false;
+  var _readingTag = false;
+  final _rfidTrigger = RfidTrigger();
   var _summaryOpen = true;
   var _gstOn = true;
   String? _error;
@@ -84,11 +87,13 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   @override
   void initState() {
     super.initState();
+    _rfidTrigger.attach(_readTagIntoQuotation);
     _load();
   }
 
   @override
   void dispose() {
+    _rfidTrigger.detach();
     for (final controller in _fields.values) {
       controller.dispose();
     }
@@ -156,6 +161,34 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     );
     if (item == null || !mounted) return;
     _useItem(item);
+  }
+
+  Future<void> _readTagIntoQuotation() async {
+    if (_readingTag) return;
+    final typed = _lookup.text.trim();
+    if (!RfidService.instance.isSupported) {
+      if (typed.isEmpty) {
+        await _pickItem();
+        return;
+      }
+      await _scanLookup();
+      return;
+    }
+
+    _readingTag = true;
+    final read = await RfidService.instance.readOneEpc();
+    _readingTag = false;
+    if (!mounted) return;
+    if (read.epc != null) {
+      _lookup.text = read.epc!;
+      await _scanLookup();
+      return;
+    }
+    if (typed.isNotEmpty) {
+      await _scanLookup();
+      return;
+    }
+    _toast(read.error ?? 'No tag found');
   }
 
   Future<void> _scanLookup() async {
@@ -478,9 +511,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         onSubmitted: (_) => _scanLookup(),
         actions: [
           IconButton(
-            onPressed: _scanLookup,
+            onPressed: _readTagIntoQuotation,
             icon: const Icon(Icons.qr_code_scanner, color: AppColors.goldText),
-            tooltip: 'Find item',
+            tooltip: 'Scan RFID tag',
           ),
           _roundAdd(_pickItem),
         ],
@@ -722,7 +755,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
             children: [
               Expanded(child: _action('Cancel', Icons.close, AppColors.charcoal, () => Navigator.pop(context))),
               const SizedBox(width: 8),
-              Expanded(child: _action('Scan', Icons.qr_code_scanner, AppColors.charcoal, _scanLookup)),
+              Expanded(child: _action('Scan', Icons.qr_code_scanner, AppColors.charcoal, _readTagIntoQuotation)),
               const SizedBox(width: 8),
               Expanded(
                 child: _action(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
@@ -38,6 +39,8 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   List<StockItem> _suggestions = const [];
   var _loadingCustomers = false;
   var _saving = false;
+  var _readingTag = false;
+  final _rfidTrigger = RfidTrigger();
   late DateTime _docDate;
   late DateTime _validUntil;
   int _quotationId = 0;
@@ -61,10 +64,12 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       _items.addAll(detail.items);
     }
     _loadCustomers();
+    _rfidTrigger.attach(_readTagIntoQuotation);
   }
 
   @override
   void dispose() {
+    _rfidTrigger.detach();
     _debounce?.cancel();
     _lookup.dispose();
     _branch.dispose();
@@ -134,11 +139,45 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   Future<void> _scanLookup() async {
     final query = _lookup.text.trim();
     if (query.isEmpty) {
+      await _readTagIntoQuotation();
+      return;
+    }
+    await _findAndAdd(query);
+  }
+
+  Future<void> _readTagIntoQuotation() async {
+    if (_readingTag) return;
+    final typed = _lookup.text.trim();
+    if (!RfidService.instance.isSupported) {
+      if (typed.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter an RFID or item code, then scan or use +.')),
+        );
+        return;
+      }
+      await _findAndAdd(typed);
+      return;
+    }
+
+    _readingTag = true;
+    final read = await RfidService.instance.readOneEpc();
+    _readingTag = false;
+    if (!mounted) return;
+    if (read.epc == null) {
+      if (typed.isNotEmpty) {
+        await _findAndAdd(typed);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter an RFID or item code, then scan or use +.')),
+        SnackBar(content: Text(read.error ?? 'No tag found')),
       );
       return;
     }
+    _lookup.text = read.epc!;
+    await _findAndAdd(read.epc!);
+  }
+
+  Future<void> _findAndAdd(String query) async {
     final result = await Injection.quotations.searchStock(
       clientCode: _clientCode,
       query: query,
@@ -270,7 +309,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
           _Footer(
             count: _items.length,
             gross: _gross,
-            onScan: _scanLookup,
+            onScan: _readTagIntoQuotation,
             onReview: _review,
           ),
         ],
