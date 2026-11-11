@@ -15,6 +15,7 @@ class PrintCopy {
     required this.companyAddress,
     required this.gstNumber,
     required this.gstFraction,
+    this.documentName = 'Quotation',
   });
 
   final QuotationDetail detail;
@@ -22,6 +23,7 @@ class PrintCopy {
   final String companyAddress;
   final String gstNumber;
   final double gstFraction;
+  final String documentName;
 
   List<LinePrice> get lines => [
     for (final item in detail.items)
@@ -39,7 +41,10 @@ class PrintCopy {
 
 Future<void> printQuotationPdf(PrintCopy copy) async {
   final document = _quotationPdfDocument(copy);
-  await Printing.layoutPdf(name: 'Quotation ${copy.detail.number}', onLayout: (_) => document.save());
+  await Printing.layoutPdf(
+    name: '${copy.documentName} ${copy.detail.number}',
+    onLayout: (_) => document.save(),
+  );
 }
 
 pw.Document _quotationPdfDocument(PrintCopy copy) {
@@ -50,14 +55,14 @@ pw.Document _quotationPdfDocument(PrintCopy copy) {
       margin: const pw.EdgeInsets.fromLTRB(18, 20, 18, 20),
       build: (context) => [
         pw.Text(
-          copy.companyName.isEmpty ? 'Quotation' : copy.companyName,
+          copy.companyName.isEmpty ? copy.documentName : copy.companyName,
           style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
         ),
         if (copy.companyAddress.isNotEmpty) pw.Text(copy.companyAddress, style: const pw.TextStyle(fontSize: 10)),
         if (copy.gstNumber.isNotEmpty) pw.Text('GSTN: ${copy.gstNumber}', style: const pw.TextStyle(fontSize: 10)),
         pw.SizedBox(height: 8),
         pw.Text('Customer Name : ${copy.detail.customer.name}'),
-        pw.Text('Quotation No : ${copy.detail.number}'),
+        pw.Text('${copy.documentName} No : ${copy.detail.number}'),
         if (copy.detail.customer.mobile.isNotEmpty) pw.Text('Phone No : ${copy.detail.customer.mobile}'),
         pw.SizedBox(height: 12),
         pw.Text('Item Details', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
@@ -204,12 +209,16 @@ Future<void> printQuotationOnPos(PrintCopy copy) async {
       );
     }
 
-    await line(copy.companyName.isEmpty ? 'QUOTATION' : copy.companyName, bold: true, center: true);
+    await line(
+      copy.companyName.isEmpty ? copy.documentName.toUpperCase() : copy.companyName,
+      bold: true,
+      center: true,
+    );
     if (copy.companyAddress.isNotEmpty) await line(copy.companyAddress, center: true);
     if (copy.gstNumber.isNotEmpty) await line('GSTN: ${copy.gstNumber}', center: true);
     await line('--------------------------------');
     await line('Customer: ${copy.detail.customer.name}');
-    await line('Quotation: ${copy.detail.number}');
+    await line('${copy.documentName}: ${copy.detail.number}');
     if (copy.detail.customer.mobile.isNotEmpty) await line('Phone: ${copy.detail.customer.mobile}');
     await line('--------------------------------');
     for (var index = 0; index < copy.detail.items.length; index++) {
@@ -239,7 +248,7 @@ Future<void> printQuotationOnPos(PrintCopy copy) async {
   }
 }
 
-Future<String?> askPrintChoice(BuildContext context) {
+Future<String?> askPrintChoice(BuildContext context, {String title = 'Print quotation'}) {
   return showModalBottomSheet<String>(
     context: context,
     builder: (context) {
@@ -247,8 +256,8 @@ Future<String?> askPrintChoice(BuildContext context) {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const ListTile(
-              title: Text('Print quotation', style: TextStyle(fontWeight: FontWeight.w700)),
+            ListTile(
+              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
             ),
             ListTile(
               leading: const Icon(Icons.picture_as_pdf_outlined),

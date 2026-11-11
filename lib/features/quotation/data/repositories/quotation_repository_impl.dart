@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
 import '../../../../core/utils/result.dart';
@@ -92,9 +95,14 @@ class QuotationRepositoryImpl implements QuotationRepository {
   Future<Result<List<QuotationField>>> loadPosFields({
     required String clientCode,
     required String userId,
+    String? pageName,
   }) {
     return _guard(
-      () => _remote.loadPosFields(clientCode: clientCode, userId: userId),
+      () => _remote.loadPosFields(
+        clientCode: clientCode,
+        userId: userId,
+        pageName: pageName ?? AppConstants.quotationPageName,
+      ),
     );
   }
 
@@ -122,6 +130,36 @@ class QuotationRepositoryImpl implements QuotationRepository {
   List<StockItem> labeledStockMatching(String clientCode, String query) {
     if (!stock.readyFor(clientCode)) return const [];
     return stock.filter(query);
+  }
+
+  @override
+  Future<List<StockItem>> stockForTags(String clientCode, List<String> codes) async {
+    if (clientCode.isEmpty || codes.isEmpty) return const [];
+    if (stock.clientCode != clientCode || stock.rows.isEmpty) {
+      unawaited(stock.warm(clientCode, () {}));
+      final deadline = DateTime.now().add(const Duration(seconds: 8));
+      while (stock.clientCode == clientCode && stock.rows.isEmpty && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+    }
+    final found = <String, StockItem>{
+      if (stock.clientCode == clientCode)
+        for (final item in stock.findTags(codes)) item.identity: item,
+    };
+    final pending = codes.where((code) {
+      return found.values.every((item) => !stock.matchesTag(item, code));
+    }).take(40);
+    for (final code in pending) {
+      final result = await searchStock(clientCode: clientCode, query: code);
+      if (result case Success(:final data)) {
+        for (final item in data) {
+          if (!stock.matchesTag(item, code)) continue;
+          found[item.identity] = item;
+          break;
+        }
+      }
+    }
+    return found.values.toList();
   }
 
   @override

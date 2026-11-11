@@ -17,6 +17,32 @@ class LabeledStockIndex {
 
   bool readyFor(String code) => clientCode == code && rows.isNotEmpty;
 
+  List<StockItem> findTags(Iterable<String> codes) {
+    if (rows.isEmpty) return const [];
+    final map = <String, StockItem>{};
+    for (final item in rows) {
+      _indexTag(map, item.rfid, item, tid: true);
+      _indexTag(map, item.itemCode, item);
+      _indexTag(map, item.extras['tidnumber'], item, tid: true);
+      _indexTag(map, item.extras['tid'], item, tid: true);
+      _indexTag(map, item.extras['rfidcode'], item, tid: true);
+    }
+    final found = <String, StockItem>{};
+    for (final raw in codes) {
+      final item = _lookupTag(map, raw);
+      if (item != null) found[item.identity] = item;
+    }
+    return found.values.toList();
+  }
+
+  bool matchesTag(StockItem item, String raw) {
+    return _tagKeysMatch(item.rfid, raw, tid: true) ||
+        _tagKeysMatch(item.itemCode, raw) ||
+        _tagKeysMatch(item.extras['tidnumber'] ?? '', raw, tid: true) ||
+        _tagKeysMatch(item.extras['tid'] ?? '', raw, tid: true) ||
+        _tagKeysMatch(item.extras['rfidcode'] ?? '', raw, tid: true);
+  }
+
   List<StockItem> filter(String query) {
     final needle = query.trim().toLowerCase();
     if (needle.isEmpty) return rows;
@@ -94,6 +120,87 @@ class LabeledStockIndex {
       page++;
     }
   }
+}
+
+void _indexTag(Map<String, StockItem> map, String? raw, StockItem item, {bool tid = false}) {
+  final compact = _compactTag(raw);
+  if (compact.isEmpty) return;
+  _indexCompact(map, compact, item);
+  if (!tid) return;
+  final trimmed = _withoutLeadingTidZeros(compact);
+  if (trimmed != compact) _indexCompact(map, trimmed, item);
+}
+
+void _indexCompact(Map<String, StockItem> map, String compact, StockItem item) {
+  map.putIfAbsent(compact, () => item);
+  if (compact.length > 12) {
+    map.putIfAbsent(compact.substring(compact.length - 12), () => item);
+  }
+  if (compact.length > 16) {
+    map.putIfAbsent(compact.substring(compact.length - 16), () => item);
+  }
+  if (compact.length > 24) {
+    map.putIfAbsent(compact.substring(compact.length - 24), () => item);
+  }
+}
+
+StockItem? _lookupTag(Map<String, StockItem> map, String raw) {
+  final compact = _compactTag(raw);
+  if (compact.isEmpty) return null;
+  final direct = _lookupCompact(map, compact);
+  if (direct != null) return direct;
+  final trimmed = _withoutLeadingTidZeros(compact);
+  if (trimmed == compact) return null;
+  return _lookupCompact(map, trimmed);
+}
+
+StockItem? _lookupCompact(Map<String, StockItem> map, String compact) {
+  final direct = map[compact];
+  if (direct != null) return direct;
+  if (compact.length > 12) {
+    final tail = map[compact.substring(compact.length - 12)];
+    if (tail != null) return tail;
+  }
+  if (compact.length > 16) {
+    final tail = map[compact.substring(compact.length - 16)];
+    if (tail != null) return tail;
+  }
+  if (compact.length > 24) {
+    final tail = map[compact.substring(compact.length - 24)];
+    if (tail != null) return tail;
+  }
+  return null;
+}
+
+bool _tagKeysMatch(String stored, String scanned, {bool tid = false}) {
+  final left = _compactTag(stored);
+  final right = _compactTag(scanned);
+  if (left.isEmpty || right.isEmpty) return false;
+  if (left == right) return true;
+  if (tid) {
+    final trimmedLeft = _withoutLeadingTidZeros(left);
+    final trimmedRight = _withoutLeadingTidZeros(right);
+    if (trimmedLeft.isNotEmpty && trimmedLeft == trimmedRight) return true;
+    if (trimmedLeft == right || trimmedRight == left) return true;
+  }
+  if (left.length >= 12 && right.length >= 12) {
+    final leftTail = left.substring(left.length - 12);
+    final rightTail = right.substring(right.length - 12);
+    return left.endsWith(rightTail) || right.endsWith(leftTail);
+  }
+  return false;
+}
+
+/// Labelled-stock TIDs are sometimes padded with four leading zeros.
+String _withoutLeadingTidZeros(String compact) {
+  if (compact.startsWith('0000') && compact.length > 4) {
+    return compact.substring(4);
+  }
+  return compact;
+}
+
+String _compactTag(String? raw) {
+  return (raw ?? '').trim().toLowerCase().replaceAll(RegExp(r'[\s\-:]'), '');
 }
 
 /// Same first-page-then-fill behaviour for the quotation list.

@@ -95,12 +95,12 @@ class RfidService {
 
   Stream<List<RfidTagInfo>> get tagStream => _reader.rfidTagStream;
 
-  Future<String?> startInventory({List<RfidFilter>? filters}) async {
+  Future<String?> startInventory({List<RfidFilter>? filters, bool unique = false}) async {
     final blocked = await _requireReady();
     if (blocked != null) return blocked;
     final result = await _reader.startInventory(
       filters: filters,
-      inventoryParam: RfidInventoryParam(unique: false),
+      inventoryParam: RfidInventoryParam(unique: unique),
     );
     if (!result.isEffective) return result.error ?? 'Start scan failed';
     return null;
@@ -325,3 +325,80 @@ const scanKeyCodes = <int>{
 };
 
 bool isScanKey(RfidKeyEvent event) => scanKeyCodes.contains(event.keyCode);
+
+/// Reads every tag in range, then stops when the tray goes quiet.
+///
+/// A handheld trigger and a connected tray both use inventory mode, so one
+/// scan can return many tags instead of a single read.
+class RfidTrayScan {
+  StreamSubscription<List<RfidTagInfo>>? _tags;
+  Timer? _idle;
+  Timer? _max;
+  var _session = 0;
+
+  Future<({String? error, List<String> codes})> collect({
+    void Function(int count)? onCount,
+  }) async {
+    final session = ++_session;
+    final service = RfidService.instance;
+    final blocked = await service.init();
+    if (blocked != null) return (error: blocked, codes: const <String>[]);
+    await service.stopIfRunning();
+    await service.setInventoryMode(1);
+
+    final codes = <String>{};
+    final done = Completer<void>();
+    _tags = service.tagStream.listen((tags) {
+      if (session != _session) return;
+      var added = false;
+      for (final tag in tags) {
+        for (final raw in [tag.epc, tag.tid]) {
+          final value = raw.trim();
+          if (value.isEmpty) continue;
+          if (codes.add(value)) added = true;
+        }
+      }
+      if (!added) return;
+      onCount?.call(codes.length);
+      _arm(session, done, const Duration(milliseconds: 250));
+    });
+
+    final startError = await service.startInventory(unique: true);
+    if (session != _session) return (error: null, codes: codes.toList());
+    if (startError != null) {
+      await _finish(session);
+      return (error: startError, codes: const <String>[]);
+    }
+    _arm(session, done, const Duration(milliseconds: 700));
+    _max?.cancel();
+    _max = Timer(const Duration(seconds: 6), () {
+      if (session == _session && !done.isCompleted) done.complete();
+    });
+    await done.future;
+    await _finish(session);
+    return (error: null, codes: codes.toList());
+  }
+
+  void cancel() {
+    final session = ++_session;
+    _idle?.cancel();
+    _max?.cancel();
+    unawaited(_finish(session));
+  }
+
+  void _arm(int session, Completer<void> done, Duration wait) {
+    _idle?.cancel();
+    _idle = Timer(wait, () {
+      if (session == _session && !done.isCompleted) done.complete();
+    });
+  }
+
+  Future<void> _finish(int session) async {
+    _idle?.cancel();
+    _max?.cancel();
+    await _tags?.cancel();
+    _tags = null;
+    if (session != _session) return;
+    await RfidService.instance.stopIfRunning();
+  }
+}

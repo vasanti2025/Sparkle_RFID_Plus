@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
@@ -12,13 +15,17 @@ import '../../domain/entities/quotation_draft.dart';
 import '../../domain/entities/quotation_field.dart';
 import '../../domain/quotation_math.dart';
 import '../../domain/entities/stock_item.dart';
+import '../widgets/quotation_items_popup.dart';
 import '../widgets/stock_picker_sheet.dart';
 import 'add_customer_page.dart';
 
 class PosQuotationPage extends StatefulWidget {
-  const PosQuotationPage({super.key, this.detail});
+  const PosQuotationPage({super.key, this.detail, this.orderMode = false});
 
   final QuotationDetail? detail;
+
+  /// Permission-driven order form. Quotation save and fields stay unchanged.
+  final bool orderMode;
 
   @override
   State<PosQuotationPage> createState() => _PosQuotationPageState();
@@ -35,8 +42,10 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   var _loading = true;
   var _saving = false;
   var _readingTag = false;
+  var _seenTags = 0;
   final _rfidTrigger = RfidTrigger();
-  var _summaryOpen = true;
+  final _tray = RfidTrayScan();
+  var _summaryPopup = false;
   var _gstOn = true;
   String? _error;
   int _quotationId = 0;
@@ -88,12 +97,16 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   void initState() {
     super.initState();
     _rfidTrigger.attach(_readTagIntoQuotation);
+    if (_clientCode.isNotEmpty) {
+      unawaited(Injection.quotations.warmLabeledStock(_clientCode, () {}));
+    }
     _load();
   }
 
   @override
   void dispose() {
     _rfidTrigger.detach();
+    _tray.cancel();
     for (final controller in _fields.values) {
       controller.dispose();
     }
@@ -107,13 +120,14 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Sign in to load quotations.';
+        _error = widget.orderMode ? 'Sign in to load orders.' : 'Sign in to load quotations.';
       });
       return;
     }
     final fields = await Injection.quotations.loadPosFields(
       clientCode: _clientCode,
       userId: _userId,
+      pageName: widget.orderMode ? AppConstants.orderPageName : AppConstants.quotationPageName,
     );
     final customers = await Injection.quotations.loadCustomers(_clientCode);
     if (!mounted) return;
@@ -164,7 +178,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   }
 
   Future<void> _readTagIntoQuotation() async {
-    if (_readingTag) return;
+    if (_readingTag || _saving) return;
     final typed = _lookup.text.trim();
     if (!RfidService.instance.isSupported) {
       if (typed.isEmpty) {
@@ -175,20 +189,45 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       return;
     }
 
-    _readingTag = true;
-    final read = await RfidService.instance.readOneEpc();
-    _readingTag = false;
+    setState(() {
+      _readingTag = true;
+      _seenTags = 0;
+    });
+    final read = await _tray.collect(
+      onCount: (count) {
+        if (mounted) setState(() => _seenTags = count);
+      },
+    );
     if (!mounted) return;
-    if (read.epc != null) {
-      _lookup.text = read.epc!;
-      await _scanLookup();
+    if (read.error != null || read.codes.isEmpty) {
+      setState(() => _readingTag = false);
+      if (typed.isNotEmpty) {
+        await _scanLookup();
+        return;
+      }
+      _toast(read.error ?? 'No tag found');
       return;
     }
-    if (typed.isNotEmpty) {
-      await _scanLookup();
+
+    final matches = await Injection.quotations.stockForTags(_clientCode, read.codes);
+    if (!mounted) return;
+    final added = <StockItem>[];
+    for (final item in matches) {
+      if (_items.any((current) => current.identity == item.identity)) continue;
+      _useItem(item);
+      added.add(item);
+    }
+    setState(() => _readingTag = false);
+    if (added.isEmpty) {
+      _toast(matches.isEmpty ? 'Tags scanned but items were not found in stock.' : 'Already on this quotation');
       return;
     }
-    _toast(read.error ?? 'No tag found');
+    await showQuotationItemsPopup(
+      context,
+      items: added,
+      gstApplied: _gstOn,
+      gstFraction: _gstRate,
+    );
   }
 
   Future<void> _scanLookup() async {
@@ -400,6 +439,31 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     }
     setState(() => _saving = true);
     final editing = _editing;
+    if (widget.orderMode) {
+      final result = await Injection.orders.saveOrder(
+        clientCode: _clientCode,
+        customer: customer,
+        items: List<StockItem>.from(_formItems),
+        gstApplied: _gstOn,
+        gstRate: _gstRate,
+        id: _quotationId,
+        number: _quotationNo,
+        source: _source,
+      );
+      if (!mounted) return;
+      setState(() => _saving = false);
+      switch (result) {
+        case Success(:final data):
+          Injection.orders.rememberCustomer(number: data, customerName: customer.name);
+          final message = editing
+              ? 'Order updated successfully'
+              : (data.isEmpty ? 'Order saved' : 'Order $data saved');
+          Navigator.pop(context, message);
+        case Error(:final failure):
+          _toast(failure.message);
+      }
+      return;
+    }
     final result = await Injection.quotations.saveQuotation(
       clientCode: _clientCode,
       customer: customer,
@@ -435,6 +499,34 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     }
   }
 
+  Future<void> _openSummaryPopup() async {
+    if (_summaryPopup) return;
+    setState(() => _summaryPopup = true);
+    final items = List<StockItem>.from(_formItems);
+    if (!mounted) return;
+    if (items.isEmpty) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Items'),
+          content: const Text('No items available yet. Add an item to view the summary.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+          ],
+        ),
+      );
+    } else {
+      await showQuotationItemsPopup(
+        context,
+        items: items,
+        gstApplied: _gstOn,
+        gstFraction: _gstRate,
+      );
+    }
+    if (mounted) setState(() => _summaryPopup = false);
+  }
+
   void _toast(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
@@ -447,10 +539,15 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         elevation: 0,
         backgroundColor: AppColors.charcoal,
         foregroundColor: AppColors.white,
-        title: Text(widget.detail == null ? 'Quotation' : 'Edit quotation', style: const TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(
+          widget.orderMode
+              ? (widget.detail == null ? 'Order' : 'Edit order')
+              : (widget.detail == null ? 'Quotation' : 'Edit quotation'),
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
         actions: [
           IconButton(
-            onPressed: () => setState(() => _summaryOpen = true),
+            onPressed: _openSummaryPopup,
             icon: const Icon(Icons.view_list_outlined),
             tooltip: 'Summary',
           ),
@@ -475,7 +572,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
                     children: [
-                      if (_layout.any((field) => field.isCustomer)) ...[
+                      if (widget.orderMode || _layout.any((field) => field.isCustomer)) ...[
                         _customerTile(),
                         const SizedBox(height: 12),
                       ],
@@ -660,24 +757,35 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
                   child: Text('Summary', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                 ),
                 Switch(
-                  value: _summaryOpen,
+                  value: _summaryPopup,
                   activeThumbColor: Colors.white,
                   activeTrackColor: AppColors.goldText,
-                  onChanged: (value) => setState(() => _summaryOpen = value),
+                  onChanged: (value) {
+                    if (value) {
+                      _openSummaryPopup();
+                    } else {
+                      setState(() => _summaryPopup = false);
+                    }
+                  },
                 ),
-                const Icon(Icons.chevron_right, color: AppColors.muted),
+                IconButton(
+                  tooltip: 'Summary',
+                  onPressed: _openSummaryPopup,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  icon: const Icon(Icons.chevron_right, color: AppColors.muted),
+                ),
               ],
             ),
-            if (_summaryOpen) ...[
-              const Divider(height: 8),
-              Row(
-                children: [
-                  _metric('Qty', '${_items.length}'),
-                  _metric('Gross Wt', '${_gross.toStringAsFixed(3)} g'),
-                  _metric('Amount', '₹ ${_itemAmount.toStringAsFixed(2)}', alignEnd: true),
-                ],
-              ),
-            ],
+            const Divider(height: 8),
+            Row(
+              children: [
+                _metric('Qty', '${_items.length}'),
+                _metric('Gross Wt', '${_gross.toStringAsFixed(3)} g'),
+                _metric('Amount', '₹ ${_itemAmount.toStringAsFixed(2)}', alignEnd: true),
+              ],
+            ),
           ],
         ),
       ),
@@ -755,7 +863,14 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
             children: [
               Expanded(child: _action('Cancel', Icons.close, AppColors.charcoal, () => Navigator.pop(context))),
               const SizedBox(width: 8),
-              Expanded(child: _action('Scan', Icons.qr_code_scanner, AppColors.charcoal, _readTagIntoQuotation)),
+              Expanded(
+                child: _action(
+                  _readingTag ? (_seenTags == 0 ? 'Scanning' : 'Scan $_seenTags') : 'Scan',
+                  Icons.qr_code_scanner,
+                  AppColors.charcoal,
+                  _readingTag ? null : _readTagIntoQuotation,
+                ),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: _action(
@@ -792,7 +907,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       orElse: () => null,
     );
     return _labeledRow(
-      label: customerField?.label.isNotEmpty == true ? customerField!.label : 'Customer Name',
+      label: customerField?.label.isNotEmpty == true
+          ? customerField!.label
+          : (widget.orderMode ? 'Select customer' : 'Customer Name'),
       child: _borderedRow(
         controller: _customerName,
         hint: customerField?.placeholder.isNotEmpty == true

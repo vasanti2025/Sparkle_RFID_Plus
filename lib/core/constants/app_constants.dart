@@ -18,6 +18,12 @@ abstract final class AppConstants {
       '/api/RoleManagement/GetAllUserPermissions-Optimized';
 
   static const quotationPageName = 'mob_quotation';
+  static const orderPageName = 'new_custom_order';
+  static const getAllOrders = '/api/Order/GetAllOrders';
+  static const addCustomOrder = '/api/Order/AddCustomOrder';
+  static const updateCustomOrder = '/api/Order/UpdateCustomOrder';
+  static const deleteCustomOrder = '/api/Order/DeleteCustomOrder';
+  static const lastOrderNo = '/api/Order/LastOrderNo';
   static const stockPageSize = 40;
   static const stockBulkSize = 15000;
   static const quotationListPageSize = 40;

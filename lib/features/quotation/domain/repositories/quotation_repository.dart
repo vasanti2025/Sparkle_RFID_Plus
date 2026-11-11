@@ -32,6 +32,8 @@ abstract class QuotationRepository {
 
   List<StockItem> labeledStockMatching(String clientCode, String query);
 
+  Future<List<StockItem>> stockForTags(String clientCode, List<String> codes);
+
   Future<void> warmQuotations(
     String clientCode,
     void Function() onRows, {
@@ -73,6 +75,7 @@ abstract class QuotationRepository {
   Future<Result<List<QuotationField>>> loadPosFields({
     required String clientCode,
     required String userId,
+    String? pageName,
   });
 
   List<QuotationDraft> get drafts;

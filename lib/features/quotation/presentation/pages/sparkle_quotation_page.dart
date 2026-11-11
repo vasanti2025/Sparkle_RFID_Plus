@@ -40,7 +40,9 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   var _loadingCustomers = false;
   var _saving = false;
   var _readingTag = false;
+  var _seenTags = 0;
   final _rfidTrigger = RfidTrigger();
+  final _tray = RfidTrayScan();
   late DateTime _docDate;
   late DateTime _validUntil;
   int _quotationId = 0;
@@ -64,12 +66,16 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       _items.addAll(detail.items);
     }
     _loadCustomers();
+    if (_clientCode.isNotEmpty) {
+      unawaited(Injection.quotations.warmLabeledStock(_clientCode, () {}));
+    }
     _rfidTrigger.attach(_readTagIntoQuotation);
   }
 
   @override
   void dispose() {
     _rfidTrigger.detach();
+    _tray.cancel();
     _debounce?.cancel();
     _lookup.dispose();
     _branch.dispose();
@@ -146,7 +152,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   }
 
   Future<void> _readTagIntoQuotation() async {
-    if (_readingTag) return;
+    if (_readingTag || _saving) return;
     final typed = _lookup.text.trim();
     if (!RfidService.instance.isSupported) {
       if (typed.isEmpty) {
@@ -159,11 +165,18 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       return;
     }
 
-    _readingTag = true;
-    final read = await RfidService.instance.readOneEpc();
-    _readingTag = false;
+    setState(() {
+      _readingTag = true;
+      _seenTags = 0;
+    });
+    final read = await _tray.collect(
+      onCount: (count) {
+        if (mounted) setState(() => _seenTags = count);
+      },
+    );
     if (!mounted) return;
-    if (read.epc == null) {
+    if (read.error != null || read.codes.isEmpty) {
+      setState(() => _readingTag = false);
       if (typed.isNotEmpty) {
         await _findAndAdd(typed);
         return;
@@ -173,8 +186,29 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       );
       return;
     }
-    _lookup.text = read.epc!;
-    await _findAndAdd(read.epc!);
+
+    final matches = await Injection.quotations.stockForTags(_clientCode, read.codes);
+    if (!mounted) return;
+    var added = 0;
+    setState(() {
+      for (final item in matches) {
+        if (_items.any((current) => current.identity == item.identity)) continue;
+        _items.add(item);
+        added++;
+      }
+      _suggestions = const [];
+      _lookup.clear();
+      _readingTag = false;
+    });
+    if (added == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            matches.isEmpty ? 'Tags scanned but items were not found in stock.' : 'Already on this quotation',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _findAndAdd(String query) async {
@@ -310,6 +344,8 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
             count: _items.length,
             gross: _gross,
             onScan: _readTagIntoQuotation,
+            scanning: _readingTag,
+            scanLabel: _readingTag ? (_seenTags == 0 ? 'Scanning' : 'Scan $_seenTags') : 'Scan',
             onReview: _review,
           ),
         ],
@@ -730,12 +766,16 @@ class _Footer extends StatelessWidget {
     required this.gross,
     required this.onScan,
     required this.onReview,
+    this.scanning = false,
+    this.scanLabel = 'Scan',
   });
 
   final int count;
   final double gross;
   final VoidCallback onScan;
   final VoidCallback onReview;
+  final bool scanning;
+  final String scanLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -758,9 +798,9 @@ class _Footer extends StatelessWidget {
               Row(
                 children: [
                   OutlinedButton.icon(
-                    onPressed: onScan,
+                    onPressed: scanning ? null : onScan,
                     icon: const Icon(Icons.wifi_tethering),
-                    label: const Text('Scan'),
+                    label: Text(scanLabel),
                   ),
                   const SizedBox(width: 10),
                   Expanded(

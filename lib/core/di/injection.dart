@@ -7,6 +7,9 @@ import '../../features/auth/data/repositories/auth_repository_impl.dart';
 import '../../features/auth/domain/repositories/auth_repository.dart';
 import '../../features/auth/domain/usecases/get_remembered_username.dart';
 import '../../features/auth/domain/usecases/login.dart';
+import '../../features/orders/data/datasources/order_remote_data_source.dart';
+import '../../features/orders/data/repositories/order_repository_impl.dart';
+import '../../features/orders/domain/repositories/order_repository.dart';
 import '../../features/quotation/data/datasources/quotation_remote_data_source.dart';
 import '../../features/quotation/data/repositories/quotation_repository_impl.dart';
 import '../../features/quotation/domain/repositories/quotation_repository.dart';
@@ -32,6 +35,7 @@ class Injection {
   static late final Login login;
   static late final SettingsController settings;
   static late final QuotationRepository quotations;
+  static late final OrderRepository orders;
   static late final GetRememberedUsername rememberedUsername;
   static late final RestoreSession restoreSession;
   static late final SignOut signOut;
@@ -64,6 +68,7 @@ class Injection {
     quotations = QuotationRepositoryImpl(
       QuotationRemoteDataSource(ApiClient()),
     );
+    orders = OrderRepositoryImpl(OrderRemoteDataSource(ApiClient()));
     rememberedUsername = GetRememberedUsername(repository);
     restoreSession = RestoreSession(repository);
     signOut = SignOut(repository);

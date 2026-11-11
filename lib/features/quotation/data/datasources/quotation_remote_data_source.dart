@@ -554,19 +554,30 @@ class QuotationRemoteDataSource {
   Future<List<QuotationField>> loadPosFields({
     required String clientCode,
     required String userId,
+    String pageName = AppConstants.quotationPageName,
   }) async {
-    final body = await _api.post(AppConstants.userPermissions, {
-      'ClientCode': clientCode,
-      'UserId': int.tryParse(userId) ?? userId,
-      'isMobView': true,
-      'PageName': AppConstants.quotationPageName,
-      'visibility': 'Visible',
-    });
+    final requested = pageName.toLowerCase();
+    final orderPage = requested == AppConstants.orderPageName;
+    final body = await _api.post(
+      AppConstants.userPermissions,
+      orderPage
+          ? {
+              'ClientCode': clientCode,
+              'PageName': pageName,
+            }
+          : {
+              'ClientCode': clientCode,
+              'UserId': int.tryParse(userId) ?? userId,
+              'isMobView': true,
+              'PageName': pageName,
+              'visibility': 'Visible',
+            },
+    );
     final modules = _modules(body);
     final fields = <QuotationField>[];
     for (final module in modules) {
       final page = '${module['PageName'] ?? ''}'.toLowerCase();
-      if (page.isNotEmpty && page != AppConstants.quotationPageName) continue;
+      if (page.isNotEmpty && page != requested) continue;
       final controls = module['PageControls'];
       if (controls is! List) continue;
       for (final raw in controls) {

@@ -8,7 +8,7 @@ import '../../../quotation/presentation/pages/quotation_list_page.dart';
 import '../../../settings/presentation/pages/settings_page.dart';
 import '../../../find/presentation/pages/find_jewellery_page.dart';
 import '../../../inventory/presentation/pages/inventory_page.dart';
-import '../../../orders/presentation/pages/orders_page.dart';
+import '../../../orders/presentation/orders_entry.dart';
 import '../../../products/presentation/pages/products_page.dart';
 import '../../../tools/presentation/workspace_flow.dart';
 import '../../../transfers/presentation/pages/transfer_page.dart';
@@ -647,7 +647,7 @@ void _openTool(BuildContext context, String label) {
   switch (label) {
     case AppStrings.orders:
       Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => const OrdersPage()),
+        MaterialPageRoute<void>(builder: (_) => ordersScreen()),
       );
     case AppStrings.transfers:
       Navigator.of(context).push(

@@ -8,7 +8,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../auth/presentation/pages/login_page.dart';
 import '../../find/presentation/pages/find_jewellery_page.dart';
 import '../../inventory/presentation/pages/inventory_page.dart';
-import '../../orders/presentation/pages/orders_page.dart';
+import '../../orders/presentation/orders_entry.dart';
 import '../../products/presentation/pages/products_page.dart';
 import '../../quotation/presentation/pages/quotation_list_page.dart';
 import '../../transfers/presentation/pages/transfer_page.dart';
@@ -65,7 +65,7 @@ void openSparkleModule(BuildContext context, String module, {bool replaceSheet =
     case AppStrings.search:
       openSheet(showFindJewellery);
     case AppStrings.orders:
-      openPage(const OrdersPage());
+      openPage(ordersScreen());
     case AppStrings.quotations:
       openPage(const QuotationListPage());
     case AppStrings.transfers:
