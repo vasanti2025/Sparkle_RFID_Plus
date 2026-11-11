@@ -9,12 +9,42 @@ import '../../../quotation/domain/entities/quotation_detail.dart';
 import '../../../quotation/domain/entities/stock_item.dart';
 import '../../../quotation/domain/quotation_math.dart';
 import '../../domain/entities/order_record.dart';
+import '../../domain/order_math.dart';
 import 'order_rows.dart';
 
 class OrderRemoteDataSource {
   OrderRemoteDataSource(this._api);
 
   final ApiClient _api;
+
+  Future<Map<String, double>> dailyRates(String clientCode) async {
+    try {
+      final body = await _api.post(AppConstants.getAllDailyRate, {'ClientCode': clientCode});
+      final rates = <String, double>{};
+      for (final row in _rateRows(body)) {
+        final name = _text(row, const ['PurityName', 'Purity', 'Name']).trim().toLowerCase();
+        final rate = double.tryParse(_text(row, const ['Rate', 'TodaysRate', 'TodayRate']));
+        if (name.isEmpty || rate == null) continue;
+        rates[name] = rate;
+      }
+      return rates;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  List<Map<String, dynamic>> _rateRows(dynamic body) {
+    if (body is List) {
+      return body.whereType<Map>().map(Map<String, dynamic>.from).toList();
+    }
+    if (body is Map) {
+      for (final key in const ['data', 'Data', 'items', 'Items']) {
+        final nested = body[key];
+        if (nested is List) return _rateRows(nested);
+      }
+    }
+    return const [];
+  }
 
   Future<List<OrderRecord>> orderPage({
     required String clientCode,
@@ -137,12 +167,10 @@ class OrderRemoteDataSource {
     final now = DateTime.now();
     final orderDate = isoOffset(now);
     final deliver = _dateOnly(now);
-    final priced = [
-      for (final item in items)
-        withLinePrice(item, priceLine(item, applyGst: gstApplied, gstFraction: gstRate)),
-    ];
+    final priced = items;
     final lines = [
-      for (final item in priced) priceLine(item, applyGst: gstApplied, gstFraction: gstRate),
+      for (final item in priced)
+        orderStoredLine(item, applyGst: gstApplied, gstFraction: gstRate),
     ];
     final rateBase = lines.where((line) => !line.mrp).fold<double>(0, (sum, line) => sum + line.item);
     final mrpBase = lines.where((line) => line.mrp).fold<double>(0, (sum, line) => sum + line.total);
@@ -155,7 +183,7 @@ class OrderRemoteDataSource {
     final status = _text(source, const ['OrderStatus']);
     final orderItems = <Map<String, dynamic>>[];
     for (final item in priced) {
-      final line = priceLine(item, applyGst: gstApplied, gstFraction: gstRate);
+      final line = orderStoredLine(item, applyGst: gstApplied, gstFraction: gstRate);
       orderItems.add(
         _orderItem(
           item: item,

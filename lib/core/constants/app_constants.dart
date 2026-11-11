@@ -7,6 +7,7 @@ abstract final class AppConstants {
   static const getAllCustomers = '/api/ClientOnboarding/GetAllCustomer';
   static const addCustomer = '/api/ClientOnboarding/AddCustomer';
   static const getAllLabeledStock = '/api/ProductMaster/GetAllLabeledStock';
+  static const getAllDailyRate = '/api/ProductMaster/GetAllDailyRate';
   static const getAllQuotation = '/api/Order/GetAllQuotation';
   static const addQuotation = '/api/Order/AddQuotation';
   static const updateQuotation = '/api/Order/UpdateQuotation';

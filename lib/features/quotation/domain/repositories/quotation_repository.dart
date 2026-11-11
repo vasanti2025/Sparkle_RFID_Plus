@@ -32,7 +32,11 @@ abstract class QuotationRepository {
 
   List<StockItem> labeledStockMatching(String clientCode, String query);
 
-  Future<List<StockItem>> stockForTags(String clientCode, List<String> codes);
+  Future<List<StockItem>> stockForTags(
+    String clientCode,
+    List<String> codes, {
+    List<List<String>> tags = const [],
+  });
 
   Future<void> warmQuotations(
     String clientCode,

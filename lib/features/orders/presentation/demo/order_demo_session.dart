@@ -11,6 +11,7 @@ class OrderPiece {
     this.totalMg,
     this.packingMg,
     this.branch,
+    this.extras = const {},
   });
 
   final String id;
@@ -22,6 +23,7 @@ class OrderPiece {
   int? totalMg;
   int? packingMg;
   String? branch;
+  final Map<String, String> extras;
 
   OrderPiece copy() => OrderPiece(
     id: id,
@@ -33,6 +35,7 @@ class OrderPiece {
     totalMg: totalMg,
     packingMg: packingMg,
     branch: branch,
+    extras: Map<String, String>.from(extras),
   );
 }
 
@@ -87,28 +90,37 @@ class OrderDetails {
 class DemoOrder {
   DemoOrder({
     this.id,
+    this.serverId = 0,
+    this.customerId = 0,
     this.customer = '',
     List<OrderPiece>? items,
     OrderDetails? details,
     this.gst = false,
     this.dirty = false,
+    this.pending = false,
   }) : items = items ?? [],
        details = details ?? OrderDetails();
 
   String? id;
+  int serverId;
+  int customerId;
   String customer;
   List<OrderPiece> items;
   OrderDetails details;
   bool gst;
   bool dirty;
+  bool pending;
 
   DemoOrder copy() => DemoOrder(
     id: id,
+    serverId: serverId,
+    customerId: customerId,
     customer: customer,
     items: items.map((item) => item.copy()).toList(),
     details: details.copy(),
     gst: gst,
     dirty: dirty,
+    pending: pending,
   );
 }
 
@@ -172,6 +184,30 @@ class OrderDemoSession {
     );
     draft = order?.copy() ?? DemoOrder();
     draft?.dirty = false;
+  }
+
+  void replaceLive(List<DemoOrder> rows) {
+    orders
+      ..clear()
+      ..addAll(rows);
+  }
+
+  void setCustomers(List<String> names) {
+    customers
+      ..clear()
+      ..addAll(names);
+  }
+
+  bool addPiece(OrderPiece piece) {
+    rememberCatalog([piece]);
+    return addItem(piece.id);
+  }
+
+  void rememberCatalog(Iterable<OrderPiece> pieces) {
+    for (final piece in pieces) {
+      if (piece.id.isEmpty || _find(piece.id) != null) continue;
+      catalog.add(piece);
+    }
   }
 
   bool addItem(String id) {

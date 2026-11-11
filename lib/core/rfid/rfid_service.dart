@@ -328,55 +328,82 @@ bool isScanKey(RfidKeyEvent event) => scanKeyCodes.contains(event.keyCode);
 
 /// Reads every tag in range, then stops when the tray goes quiet.
 ///
-/// A handheld trigger and a connected tray both use inventory mode, so one
-/// scan can return many tags instead of a single read.
+/// EPC + TID inventory reports tags one after another. The radio stays on
+/// long enough for the rest of the tags to arrive, instead of stopping
+/// after the first one.
 class RfidTrayScan {
   StreamSubscription<List<RfidTagInfo>>? _tags;
   Timer? _idle;
   Timer? _max;
   var _session = 0;
+  var _fast = false;
 
-  Future<({String? error, List<String> codes})> collect({
+  /// [fast] is the order scan: stop shortly after the last new tag instead of
+  /// holding the radio for several seconds. Quotation keeps the longer read.
+  Future<({String? error, List<String> codes, List<List<String>> tags})> collect({
     void Function(int count)? onCount,
+    bool fast = false,
   }) async {
     final session = ++_session;
+    _fast = fast;
     final service = RfidService.instance;
     final blocked = await service.init();
-    if (blocked != null) return (error: blocked, codes: const <String>[]);
+    if (blocked != null) {
+      return (error: blocked, codes: const <String>[], tags: const <List<String>>[]);
+    }
     await service.stopIfRunning();
     await service.setInventoryMode(1);
 
     final codes = <String>{};
+    final reads = <List<String>>[];
     final done = Completer<void>();
+    final started = DateTime.now();
     _tags = service.tagStream.listen((tags) {
       if (session != _session) return;
       var added = false;
       for (final tag in tags) {
-        for (final raw in [tag.epc, tag.tid]) {
-          final value = raw.trim();
+        final epc = tag.epc.trim();
+        final tid = tag.tid.trim();
+        final known = (epc.isNotEmpty && codes.contains(epc)) || (tid.isNotEmpty && codes.contains(tid));
+        final values = <String>[];
+        for (final value in [epc, tid]) {
           if (value.isEmpty) continue;
+          values.add(value);
           if (codes.add(value)) added = true;
         }
+        if (values.isEmpty) continue;
+        reads.add(values);
+        if (!known) _beep();
       }
       if (!added) return;
       onCount?.call(codes.length);
-      _arm(session, done, const Duration(milliseconds: 250));
+      _armUntilQuiet(session, done, started, codes.isNotEmpty);
     });
 
     final startError = await service.startInventory(unique: true);
-    if (session != _session) return (error: null, codes: codes.toList());
+    if (session != _session) {
+      return (error: null, codes: codes.toList(), tags: reads);
+    }
     if (startError != null) {
       await _finish(session);
-      return (error: startError, codes: const <String>[]);
+      return (error: startError, codes: const <String>[], tags: const <List<String>>[]);
     }
-    _arm(session, done, const Duration(milliseconds: 700));
+    _armUntilQuiet(session, done, started, codes.isNotEmpty);
     _max?.cancel();
-    _max = Timer(const Duration(seconds: 6), () {
+    _max = Timer(_fast ? const Duration(seconds: 4) : const Duration(seconds: 8), () {
       if (session == _session && !done.isCompleted) done.complete();
     });
     await done.future;
     await _finish(session);
-    return (error: null, codes: codes.toList());
+    return (error: null, codes: codes.toList(), tags: reads);
+  }
+
+  void _beep() {
+    unawaited(() async {
+      try {
+        await DeviceManager.instance.playSound(1);
+      } catch (_) {}
+    }());
   }
 
   void cancel() {
@@ -386,7 +413,17 @@ class RfidTrayScan {
     unawaited(_finish(session));
   }
 
-  void _arm(int session, Completer<void> done, Duration wait) {
+  /// Order scans stop 650ms after the last new tag. Other scans keep the
+  /// radio on for at least 3s so a slower tray still collects every tag.
+  void _armUntilQuiet(int session, Completer<void> done, DateTime started, bool hasTags) {
+    final elapsed = DateTime.now().difference(started);
+    final hold = _fast ? Duration.zero : const Duration(milliseconds: 3000);
+    final empty = _fast ? const Duration(milliseconds: 700) : const Duration(milliseconds: 2000);
+    final quiet = _fast ? const Duration(milliseconds: 650) : const Duration(milliseconds: 1200);
+    final remain = (hasTags ? hold : empty) - elapsed;
+    final wait = !hasTags
+        ? (remain.isNegative ? Duration.zero : remain)
+        : (remain > quiet ? remain : quiet);
     _idle?.cancel();
     _idle = Timer(wait, () {
       if (session == _session && !done.isCompleted) done.complete();

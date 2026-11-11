@@ -14,11 +14,19 @@ class LabeledStockIndex {
   String clientCode = '';
   List<StockItem> rows = const [];
   Future<void>? _job;
+  int _stockGeneration = 0;
+  int _indexedGeneration = -1;
+  Map<String, StockItem> _tagMap = const {};
 
   bool readyFor(String code) => clientCode == code && rows.isNotEmpty;
 
-  List<StockItem> findTags(Iterable<String> codes) {
-    if (rows.isEmpty) return const [];
+  void _replaceRows(List<StockItem> next) {
+    rows = next;
+    _stockGeneration++;
+  }
+
+  Map<String, StockItem> _tagIndex() {
+    if (_indexedGeneration == _stockGeneration) return _tagMap;
     final map = <String, StockItem>{};
     for (final item in rows) {
       _indexTag(map, item.rfid, item, tid: true);
@@ -26,7 +34,18 @@ class LabeledStockIndex {
       _indexTag(map, item.extras['tidnumber'], item, tid: true);
       _indexTag(map, item.extras['tid'], item, tid: true);
       _indexTag(map, item.extras['rfidcode'], item, tid: true);
+      _indexTag(map, item.extras['epc'], item, tid: true);
+      _indexTag(map, item.extras['barcode'], item);
+      _indexTag(map, item.extras['barcodenumber'], item);
     }
+    _tagMap = map;
+    _indexedGeneration = _stockGeneration;
+    return map;
+  }
+
+  List<StockItem> findTags(Iterable<String> codes) {
+    if (rows.isEmpty) return const [];
+    final map = _tagIndex();
     final found = <String, StockItem>{};
     for (final raw in codes) {
       final item = _lookupTag(map, raw);
@@ -40,7 +59,10 @@ class LabeledStockIndex {
         _tagKeysMatch(item.itemCode, raw) ||
         _tagKeysMatch(item.extras['tidnumber'] ?? '', raw, tid: true) ||
         _tagKeysMatch(item.extras['tid'] ?? '', raw, tid: true) ||
-        _tagKeysMatch(item.extras['rfidcode'] ?? '', raw, tid: true);
+        _tagKeysMatch(item.extras['rfidcode'] ?? '', raw, tid: true) ||
+        _tagKeysMatch(item.extras['epc'] ?? '', raw, tid: true) ||
+        _tagKeysMatch(item.extras['barcode'] ?? '', raw) ||
+        _tagKeysMatch(item.extras['barcodenumber'] ?? '', raw);
   }
 
   List<StockItem> filter(String query) {
@@ -64,7 +86,7 @@ class LabeledStockIndex {
     }
     if (clientCode == code && _job != null) return _job!;
     clientCode = code;
-    rows = const [];
+    _replaceRows(const []);
     final job = _fill(code, onRows);
     _job = job;
     return job.whenComplete(() {
@@ -79,7 +101,7 @@ class LabeledStockIndex {
       pageSize: AppConstants.stockPageSize,
     );
     if (clientCode != code) return;
-    rows = first;
+    _replaceRows(first);
     onRows();
     if (first.length < AppConstants.stockPageSize) return;
 
@@ -94,7 +116,7 @@ class LabeledStockIndex {
     } catch (_) {}
     if (clientCode != code) return;
     if (bulk.length > rows.length) {
-      rows = bulk;
+      _replaceRows(bulk);
       onRows();
       return;
     }
@@ -113,7 +135,7 @@ class LabeledStockIndex {
         if (seen.add(item.identity)) added.add(item);
       }
       if (added.isNotEmpty) {
-        rows = [...rows, ...added];
+        _replaceRows([...rows, ...added]);
         onRows();
       }
       if (next.length < 200) break;
@@ -126,9 +148,9 @@ void _indexTag(Map<String, StockItem> map, String? raw, StockItem item, {bool ti
   final compact = _compactTag(raw);
   if (compact.isEmpty) return;
   _indexCompact(map, compact, item);
-  if (!tid) return;
-  final trimmed = _withoutLeadingTidZeros(compact);
-  if (trimmed != compact) _indexCompact(map, trimmed, item);
+  for (final alias in _tagAliases(compact, tid: tid)) {
+    _indexCompact(map, alias, item);
+  }
 }
 
 void _indexCompact(Map<String, StockItem> map, String compact, StockItem item) {
@@ -149,9 +171,11 @@ StockItem? _lookupTag(Map<String, StockItem> map, String raw) {
   if (compact.isEmpty) return null;
   final direct = _lookupCompact(map, compact);
   if (direct != null) return direct;
-  final trimmed = _withoutLeadingTidZeros(compact);
-  if (trimmed == compact) return null;
-  return _lookupCompact(map, trimmed);
+  for (final alias in _tagAliases(compact, tid: true)) {
+    final match = _lookupCompact(map, alias);
+    if (match != null) return match;
+  }
+  return null;
 }
 
 StockItem? _lookupCompact(Map<String, StockItem> map, String compact) {
@@ -177,12 +201,9 @@ bool _tagKeysMatch(String stored, String scanned, {bool tid = false}) {
   final right = _compactTag(scanned);
   if (left.isEmpty || right.isEmpty) return false;
   if (left == right) return true;
-  if (tid) {
-    final trimmedLeft = _withoutLeadingTidZeros(left);
-    final trimmedRight = _withoutLeadingTidZeros(right);
-    if (trimmedLeft.isNotEmpty && trimmedLeft == trimmedRight) return true;
-    if (trimmedLeft == right || trimmedRight == left) return true;
-  }
+  final leftNames = {left, ..._tagAliases(left, tid: tid)};
+  final rightNames = {right, ..._tagAliases(right, tid: true)};
+  if (leftNames.intersection(rightNames).isNotEmpty) return true;
   if (left.length >= 12 && right.length >= 12) {
     final leftTail = left.substring(left.length - 12);
     final rightTail = right.substring(right.length - 12);
@@ -191,12 +212,71 @@ bool _tagKeysMatch(String stored, String scanned, {bool tid = false}) {
   return false;
 }
 
+/// A tag may be stored or scanned with four leading zeros, such as 0000SP28
+/// or hex 000053503238. Those zeros are ignored. The rest of the tag is unchanged.
+Set<String> _tagAliases(String compact, {required bool tid}) {
+  final aliases = <String>{};
+  final trimmed = _withoutLeadingTidZeros(compact);
+  if (trimmed != compact) aliases.add(trimmed);
+  if (tid) {
+    for (final source in {compact, trimmed}) {
+      final text = _asciiFromHex(source);
+      if (text == null) continue;
+      aliases.add(text);
+      final plain = _withoutLeadingTidZeros(text);
+      if (plain != text) aliases.add(plain);
+    }
+  }
+  for (final source in {compact, trimmed}) {
+    final hex = _hexFromAscii(source);
+    if (hex == null) continue;
+    aliases.add(hex);
+    aliases.add('0000$hex');
+    final padded = _hexFromAscii('0000$source');
+    if (padded != null) aliases.add(padded);
+  }
+  return aliases;
+}
+
+String? _asciiFromHex(String compact) {
+  if (compact.length < 4 || compact.length > 40 || compact.length.isOdd) return null;
+  if (!RegExp(r'^[0-9a-f]+$').hasMatch(compact)) return null;
+  final chars = StringBuffer();
+  for (var i = 0; i < compact.length; i += 2) {
+    final byte = int.parse(compact.substring(i, i + 2), radix: 16);
+    if (byte < 48 || byte > 122 || (byte > 57 && byte < 65) || (byte > 90 && byte < 97)) {
+      return null;
+    }
+    chars.writeCharCode(byte);
+  }
+  final text = chars.toString().toLowerCase();
+  if (text.length < 2 || !RegExp(r'[a-z]').hasMatch(text)) return null;
+  return text;
+}
+
+String? _hexFromAscii(String compact) {
+  if (compact.length < 2 || compact.length > 20) return null;
+  if (!RegExp(r'^[a-z0-9]+$').hasMatch(compact) || !RegExp(r'[a-z]').hasMatch(compact)) {
+    return null;
+  }
+  return compact.toUpperCase().codeUnits.map((unit) => unit.toRadixString(16).padLeft(2, '0')).join();
+}
+
 /// Labelled-stock TIDs are sometimes padded with four leading zeros.
 String _withoutLeadingTidZeros(String compact) {
   if (compact.startsWith('0000') && compact.length > 4) {
     return compact.substring(4);
   }
   return compact;
+}
+
+/// Scan values plus readable item-code forms, such as 000053503238 and SP28.
+List<String> scanLookupKeys(String raw) {
+  final compact = _compactTag(raw);
+  if (compact.isEmpty) return const [];
+  final keys = <String>[raw.trim(), ..._tagAliases(compact, tid: true)];
+  final seen = <String>{};
+  return [for (final key in keys) if (key.isNotEmpty && seen.add(key.toLowerCase())) key];
 }
 
 String _compactTag(String? raw) {

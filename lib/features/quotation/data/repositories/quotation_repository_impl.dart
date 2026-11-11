@@ -133,7 +133,11 @@ class QuotationRepositoryImpl implements QuotationRepository {
   }
 
   @override
-  Future<List<StockItem>> stockForTags(String clientCode, List<String> codes) async {
+  Future<List<StockItem>> stockForTags(
+    String clientCode,
+    List<String> codes, {
+    List<List<String>> tags = const [],
+  }) async {
     if (clientCode.isEmpty || codes.isEmpty) return const [];
     if (stock.clientCode != clientCode || stock.rows.isEmpty) {
       unawaited(stock.warm(clientCode, () {}));
@@ -146,17 +150,25 @@ class QuotationRepositoryImpl implements QuotationRepository {
       if (stock.clientCode == clientCode)
         for (final item in stock.findTags(codes)) item.identity: item,
     };
+    final matched = <String>{
+      for (final tag in tags)
+        if (tag.any((code) => found.values.any((item) => stock.matchesTag(item, code)))) ...tag,
+    };
     final pending = codes.where((code) {
+      if (matched.contains(code)) return false;
       return found.values.every((item) => !stock.matchesTag(item, code));
     }).take(40);
     for (final code in pending) {
-      final result = await searchStock(clientCode: clientCode, query: code);
-      if (result case Success(:final data)) {
-        for (final item in data) {
-          if (!stock.matchesTag(item, code)) continue;
-          found[item.identity] = item;
-          break;
+      for (final key in scanLookupKeys(code)) {
+        final result = await searchStock(clientCode: clientCode, query: key);
+        if (result case Success(:final data)) {
+          for (final item in data) {
+            if (!stock.matchesTag(item, code)) continue;
+            found[item.identity] = item;
+            break;
+          }
         }
+        if (found.values.any((item) => stock.matchesTag(item, code))) break;
       }
     }
     return found.values.toList();

@@ -6,8 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/rfid/rfid_service.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/utils/result.dart';
+import '../../../quotation/domain/entities/customer_record.dart';
+import '../../domain/order_math.dart';
 import '../demo/order_demo_session.dart';
+import '../sparkle_order_live.dart';
 
 enum _OrderPage { list, editor }
 
@@ -33,6 +40,8 @@ class _OrdersPageState extends State<OrdersPage> {
   static const _note = Color(0xFF817866);
 
   final _session = OrderDemoSession.instance;
+  final _live = SparkleOrderLive();
+  final _tray = RfidTrayScan();
   final _orderQuery = TextEditingController();
   final _itemQuery = TextEditingController();
   var _page = _OrderPage.list;
@@ -49,13 +58,25 @@ class _OrdersPageState extends State<OrdersPage> {
       if (mounted && _page == _OrderPage.list) setState(() {});
     });
     _itemQuery.addListener(() {
+      _rememberTypedStock();
       if (mounted && _page == _OrderPage.editor) setState(() {});
     });
+    _live.open(_session, () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _rememberTypedStock() {
+    final query = _itemQuery.text.trim();
+    if (query.isEmpty || AppSession.clientCode.isEmpty) return;
+    final matches = Injection.quotations.labeledStockMatching(AppSession.clientCode, query);
+    _session.rememberCatalog(matches.take(40).map(pieceFromStock));
   }
 
   @override
   void dispose() {
     _stopScan();
+    _tray.cancel();
     _orderQuery.dispose();
     _itemQuery.dispose();
     super.dispose();
@@ -108,22 +129,40 @@ class _OrdersPageState extends State<OrdersPage> {
     setState(() => _page = _OrderPage.editor);
   }
 
-  void _toggleScan() {
+  Future<void> _toggleScan() async {
     if (_capturing) {
+      _tray.cancel();
       setState(_stopScan);
       return;
     }
+    if (!RfidService.instance.isSupported) {
+      _toast('RFID scanner is not available on this device');
+      return;
+    }
     setState(() => _capturing = true);
-    _timer = Timer.periodic(const Duration(milliseconds: 900), (_) {
-      if (!mounted) return;
-      final next = _session.nextUnread();
-      if (next == null) {
-        setState(_stopScan);
-        _toast(AppStrings.allPiecesRead);
-        return;
-      }
-      setState(() => _session.addItem(next.id));
-    });
+    final read = await _tray.collect(fast: true);
+    if (!mounted) return;
+    setState(_stopScan);
+    if (read.error != null || read.codes.isEmpty) {
+      _toast(read.error ?? 'No tag found');
+      return;
+    }
+    final matches = await Injection.quotations.stockForTags(
+      AppSession.clientCode,
+      read.codes,
+      tags: read.tags,
+    );
+    if (!mounted) return;
+    var added = 0;
+    for (final item in matches) {
+      if (_session.addPiece(pieceFromStock(item))) added++;
+    }
+    setState(() {});
+    if (added == 0) {
+      _toast(matches.isEmpty ? 'Tags scanned but items were not found in stock.' : 'Already on this order');
+    } else {
+      _toast('$added item${added == 1 ? '' : 's'} added');
+    }
   }
 
   Future<void> _downloadCsv() async {
@@ -245,60 +284,90 @@ class _OrdersPageState extends State<OrdersPage> {
 
   Widget _list() {
     final rows = _session.visible;
+    final names = rows.map((order) => order.customer).toSet().toList();
     return Column(
       children: [
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-            children: [
-              Row(
-                children: [
-                  Text(
-                    AppStrings.yourCommitments,
-                    style: _text(size: 10, weight: FontWeight.w600, color: const Color(0xFF80745B), letterSpacing: 0.5),
+          child: CustomScrollView(
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            AppStrings.yourCommitments,
+                            style: _text(size: 10, weight: FontWeight.w600, color: const Color(0xFF80745B), letterSpacing: 0.5),
+                          ),
+                          const Spacer(),
+                          _tag(AppStrings.demoData),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _search(_orderQuery, AppStrings.searchOrders),
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            onPressed: _views,
+                            icon: const Icon(Icons.expand_more, size: 16, color: Color(0xFF8B7550)),
+                            label: Text(_viewLabel, style: _text(size: 13, weight: FontWeight.w600)),
+                            style: TextButton.styleFrom(foregroundColor: _ink),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            tooltip: AppStrings.filterOrders,
+                            onPressed: _filters,
+                            style: IconButton.styleFrom(
+                              backgroundColor: const Color(0xFFF0EADC),
+                              foregroundColor: _gold,
+                              fixedSize: const Size(44, 44),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            icon: const Icon(Icons.tune, size: 18),
+                          ),
+                        ],
+                      ),
+                      if (_session.view == 'sku')
+                        _empty(AppStrings.skuSummary, AppStrings.skuSummaryBody)
+                      else if (rows.isEmpty)
+                        _empty(AppStrings.noOrdersFound, AppStrings.tryAnotherOrder)
+                      else if (_session.view != 'customer')
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '${rows.length} ${AppStrings.ordersInDemo}',
+                              style: _text(size: 11, color: const Color(0xFF8D7C5A)),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  const Spacer(),
-                  _tag(AppStrings.demoData),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _search(_orderQuery, AppStrings.searchOrders),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: _views,
-                    icon: const Icon(Icons.expand_more, size: 16, color: Color(0xFF8B7550)),
-                    label: Text(_viewLabel, style: _text(size: 13, weight: FontWeight.w600)),
-                    style: TextButton.styleFrom(foregroundColor: _ink),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: AppStrings.filterOrders,
-                    onPressed: _filters,
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFFF0EADC),
-                      foregroundColor: _gold,
-                      fixedSize: const Size(44, 44),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    icon: const Icon(Icons.tune, size: 18),
-                  ),
-                ],
-              ),
-              if (_session.view == 'sku')
-                _empty(AppStrings.skuSummary, AppStrings.skuSummaryBody)
-              else if (rows.isEmpty)
-                _empty(AppStrings.noOrdersFound, AppStrings.tryAnotherOrder)
-              else if (_session.view == 'customer')
-                ..._customerCards(rows)
-              else ...[
-                Text(
-                  '${rows.length} ${AppStrings.ordersInDemo}',
-                  style: _text(size: 11, color: const Color(0xFF8D7C5A)),
                 ),
-                const SizedBox(height: 8),
-                for (final order in rows) _orderCard(order),
-              ],
+              ),
+              if (_session.view == 'customer' && rows.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _customerCard(names[index], rows),
+                      childCount: names.length,
+                    ),
+                  ),
+                )
+              else if (_session.view != 'sku' && rows.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  sliver: SliverList(
+                    delegate: SliverChildBuilderDelegate(
+                      (context, index) => _orderCard(rows[index]),
+                      childCount: rows.length,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -318,16 +387,11 @@ class _OrdersPageState extends State<OrdersPage> {
     _ => AppStrings.allOrders,
   };
 
-  List<Widget> _customerCards(List<DemoOrder> rows) {
-    final names = rows.map((order) => order.customer).toSet();
-    return [
-      for (final name in names)
-        Builder(
-          builder: (context) {
-            final group = rows.where((order) => order.customer == name).toList();
-            final pieces = group.expand((order) => order.items).toList();
-            final totals = OrderDemoSession.totals(pieces);
-            return Container(
+  Widget _customerCard(String name, List<DemoOrder> rows) {
+    final group = rows.where((order) => order.customer == name).toList();
+    final pieces = group.expand((order) => order.items).toList();
+    final totals = OrderDemoSession.totals(pieces);
+    return Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -347,9 +411,6 @@ class _OrdersPageState extends State<OrdersPage> {
                 ],
               ),
             );
-          },
-        ),
-    ];
   }
 
   Widget _orderCard(DemoOrder order) {
@@ -421,7 +482,7 @@ class _OrdersPageState extends State<OrdersPage> {
         : _session.catalog.where((piece) {
             final haystack = '${piece.id} ${piece.name} ${piece.rfid}'.toLowerCase();
             return haystack.contains(_itemQuery.text.trim().toLowerCase());
-          }).toList();
+          }).take(40).toList();
     return Column(
       children: [
         Expanded(
@@ -769,11 +830,8 @@ class _OrdersPageState extends State<OrdersPage> {
             const SizedBox(height: 12),
             _filled(AppStrings.saveDemoOrder, () {
               draft.gst = gst;
-              final saved = _session.save();
-              if (saved == null) return;
               Navigator.pop(context);
-              _goList();
-              _savedSheet(saved.id!);
+              _commit(draft);
             }),
             const SizedBox(height: 8),
             Text(AppStrings.demoSaveOnly, style: _text(size: 12, color: _note)),
@@ -828,8 +886,10 @@ class _OrdersPageState extends State<OrdersPage> {
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () {
                       final draft = _draft;
+                      final customer = _live.customerNamed(name);
                       if (draft != null) {
                         draft.customer = name;
+                        draft.customerId = customer?.id ?? 0;
                         draft.dirty = true;
                       }
                       Navigator.pop(context);
@@ -853,7 +913,9 @@ class _OrdersPageState extends State<OrdersPage> {
 
   void _addCustomer() {
     final name = TextEditingController();
+    final mobile = TextEditingController();
     String? error;
+    var saving = false;
     _openSheet(
       AppStrings.addCustomer,
       StatefulBuilder(
@@ -865,18 +927,48 @@ class _OrdersPageState extends State<OrdersPage> {
                 controller: name,
                 decoration: _input(AppStrings.customerName),
               ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: mobile,
+                keyboardType: TextInputType.phone,
+                decoration: _input('Mobile'),
+              ),
               if (error != null) Text(error!, style: _text(size: 12, color: AppColors.error)),
               const SizedBox(height: 12),
-              _filled(AppStrings.useCustomer, () {
+              _filled(saving ? 'Saving' : AppStrings.useCustomer, () async {
                 final value = name.text.trim();
                 if (value.isEmpty) {
                   setSheet(() => error = AppStrings.enterCustomerName);
                   return;
                 }
-                if (!_session.customers.contains(value)) _session.customers.add(value);
+                if (mobile.text.trim().isEmpty) {
+                  setSheet(() => error = 'Enter a mobile number');
+                  return;
+                }
+                setSheet(() => saving = true);
+                final result = await Injection.quotations.addCustomer(
+                  clientCode: AppSession.clientCode,
+                  name: value,
+                  mobile: mobile.text.trim(),
+                  email: '',
+                );
+                if (!context.mounted) return;
+                if (result case Error(:final failure)) {
+                  setSheet(() {
+                    saving = false;
+                    error = failure.message;
+                  });
+                  return;
+                }
+                final created = (result as Success<CustomerRecord>).data;
+                _live.remember(created);
+                if (!_session.customers.contains(created.name)) {
+                  _session.customers.add(created.name);
+                }
                 final draft = _draft;
                 if (draft != null) {
-                  draft.customer = value;
+                  draft.customer = created.name;
+                  draft.customerId = created.id;
                   draft.dirty = true;
                 }
                 Navigator.pop(context);
@@ -888,7 +980,25 @@ class _OrdersPageState extends State<OrdersPage> {
           );
         },
       ),
-    ).whenComplete(name.dispose);
+    ).whenComplete(() {
+      name.dispose();
+      mobile.dispose();
+    });
+  }
+
+  Future<void> _commit(DemoOrder draft) async {
+    final message = await _live.save(_session, draft);
+    if (!mounted) return;
+    if (message != null && !message.startsWith('Saved on this device')) {
+      _toast(message);
+      return;
+    }
+    _goList();
+    if (message != null) {
+      _toast(message);
+      return;
+    }
+    _savedSheet(draft.id ?? '');
   }
 
   void _pick() {
@@ -1052,8 +1162,11 @@ class _OrdersPageState extends State<OrdersPage> {
                 }
                 _draft?.details = next;
                 _draft?.dirty = true;
+                FocusManager.instance.primaryFocus?.unfocus();
                 Navigator.pop(context);
-                setState(() {});
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() {});
+                });
               }),
               const SizedBox(height: 8),
               Text(AppStrings.appliesToOrder, style: _text(size: 12, color: _note)),
@@ -1062,23 +1175,82 @@ class _OrdersPageState extends State<OrdersPage> {
         },
       ),
     ).whenComplete(() {
-      for (final controller in fields.values) {
-        controller.dispose();
-      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        for (final controller in fields.values) {
+          controller.dispose();
+        }
+      });
     });
   }
 
   void _pieceDetails(OrderPiece piece) {
     String textOf(int? milligrams) => milligrams == null ? '' : (milligrams / 1000).toStringAsFixed(3);
+    String stored(List<String> keys, int? milligrams) {
+      if (milligrams != null) return textOf(milligrams);
+      final value = orderExtraNumber(piece.extras, keys);
+      return value > 0 ? value.toStringAsFixed(3) : '';
+    }
+
     final branch = TextEditingController(text: piece.branch ?? _draft?.details.branch ?? '');
     final weights = {
-      'total': TextEditingController(text: textOf(piece.totalMg)),
-      'packing': TextEditingController(text: textOf(piece.packingMg)),
+      'total': TextEditingController(text: stored(const ['totalwt', 'totalweight'], piece.totalMg)),
+      'packing': TextEditingController(text: stored(const ['packingwt', 'packingweight'], piece.packingMg)),
       'gross': TextEditingController(text: textOf(piece.grossMg)),
       'net': TextEditingController(text: textOf(piece.netMg)),
       'fw': TextEditingController(text: textOf(piece.fwMg)),
     };
+    final grossFocus = FocusNode();
+    final stone = orderExtraNumber(piece.extras, const ['stonewt', 'stoneweight', 'totalstoneweight']);
+    final diamond = orderExtraNumber(piece.extras, const ['diamondwt', 'diamondweight', 'totaldiamondweight']);
+    final finePercent = orderExtraNumber(piece.extras, const ['fineper', 'finepercentage']);
+    final wastagePercent = orderExtraNumber(piece.extras, const ['wastage', 'makingpercent', 'makingpercentage']);
+    var closed = false;
+    var writing = false;
+    var queued = false;
+    var lockGross = false;
     String? error;
+
+    void writeWeight(String key, double value) {
+      final text = value.toStringAsFixed(3);
+      final controller = weights[key]!;
+      if (controller.text == text) return;
+      writing = true;
+      controller.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+      writing = false;
+    }
+
+    void recalc({required bool keepGross}) {
+      if (writing || closed) return;
+      double read(String key) => double.tryParse(weights[key]!.text.trim()) ?? 0;
+      final next = orderWeightEdit(
+        total: read('total'),
+        packing: read('packing'),
+        gross: read('gross'),
+        stone: stone,
+        diamond: diamond,
+        finePercent: finePercent,
+        wastagePercent: wastagePercent,
+        lockGross: keepGross,
+      );
+      if (!keepGross) writeWeight('gross', next.gross);
+      writeWeight('net', next.net);
+      writeWeight('fw', next.fine);
+    }
+
+    void queueRecalc({required bool keepGross}) {
+      lockGross = keepGross;
+      if (queued) return;
+      queued = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        queued = false;
+        if (closed) return;
+        recalc(keepGross: lockGross);
+      });
+    }
+
     _openSheet(
       AppStrings.pieceDetails,
       StatefulBuilder(
@@ -1092,11 +1264,30 @@ class _OrdersPageState extends State<OrdersPage> {
               const SizedBox(height: 8),
               Text(AppStrings.weightsAndPacking, style: _text(size: 13, weight: FontWeight.w600)),
               const SizedBox(height: 8),
-              TextField(controller: weights['total'], decoration: _input(AppStrings.totalWeightG), keyboardType: TextInputType.number),
+              TextField(
+                controller: weights['total'],
+                decoration: _input(AppStrings.totalWeightG),
+                keyboardType: TextInputType.number,
+                onChanged: (_) => queueRecalc(keepGross: grossFocus.hasFocus),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: weights['packing'], decoration: _input(AppStrings.packingWeightG), keyboardType: TextInputType.number),
+              TextField(
+                controller: weights['packing'],
+                decoration: _input(AppStrings.packingWeightG),
+                keyboardType: TextInputType.number,
+                onChanged: (_) => queueRecalc(keepGross: grossFocus.hasFocus),
+              ),
               const SizedBox(height: 8),
-              TextField(controller: weights['gross'], decoration: _input(AppStrings.grossWeightG), keyboardType: TextInputType.number),
+              TextField(
+                controller: weights['gross'],
+                focusNode: grossFocus,
+                decoration: _input(AppStrings.grossWeightG),
+                keyboardType: TextInputType.number,
+                onChanged: (_) => queueRecalc(keepGross: true),
+              ),
+              const SizedBox(height: 8),
+              _row('Stone wt', '${stone.toStringAsFixed(3)} g'),
+              _row('Diamond wt', '${diamond.toStringAsFixed(3)} g'),
               const SizedBox(height: 8),
               TextField(controller: weights['net'], decoration: _input(AppStrings.netWeightG), keyboardType: TextInputType.number),
               const SizedBox(height: 8),
@@ -1104,6 +1295,7 @@ class _OrdersPageState extends State<OrdersPage> {
               if (error != null) Text(error!, style: _text(size: 12, color: AppColors.error)),
               const SizedBox(height: 12),
               _filled(AppStrings.applyToPiece, () {
+                recalc(keepGross: grossFocus.hasFocus);
                 int? read(String key) {
                   final raw = weights[key]!.text.trim();
                   if (raw.isEmpty) return null;
@@ -1124,9 +1316,26 @@ class _OrdersPageState extends State<OrdersPage> {
                   ..netMg = parsed['net']
                   ..fwMg = parsed['fw']
                   ..branch = branch.text.trim();
+                void put(String key, String? value) {
+                  if (value == null || value.isEmpty) return;
+                  try {
+                    piece.extras[key] = value;
+                  } catch (_) {}
+                }
+
+                put('totalwt', weights['total']!.text.trim());
+                put('packingwt', weights['packing']!.text.trim());
+                put('grosswt', weights['gross']!.text.trim());
+                put('netwt', weights['net']!.text.trim());
+                put('finepluswt', weights['fw']!.text.trim());
+                put('stonewt', stone.toStringAsFixed(3));
+                put('diamondwt', diamond.toStringAsFixed(3));
                 _draft?.dirty = true;
+                FocusManager.instance.primaryFocus?.unfocus();
                 Navigator.pop(context);
-                setState(() {});
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) setState(() {});
+                });
               }),
               const SizedBox(height: 8),
               Text(AppStrings.missingWeights, style: _text(size: 12, color: _note)),
@@ -1135,10 +1344,14 @@ class _OrdersPageState extends State<OrdersPage> {
         },
       ),
     ).whenComplete(() {
-      branch.dispose();
-      for (final controller in weights.values) {
-        controller.dispose();
-      }
+      closed = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        branch.dispose();
+        grossFocus.dispose();
+        for (final controller in weights.values) {
+          controller.dispose();
+        }
+      });
     });
   }
 
@@ -1296,10 +1509,12 @@ class _OrdersPageState extends State<OrdersPage> {
             const SizedBox(width: 8),
             Expanded(
               child: FilledButton(
-                onPressed: () {
-                  _session.orders.removeWhere((order) => order.id == id);
+                onPressed: () async {
+                  final message = await _live.remove(_session, id);
+                  if (!mounted) return;
                   Navigator.pop(context);
                   setState(() {});
+                  if (message != null) _toast(message);
                 },
                 style: FilledButton.styleFrom(backgroundColor: _ink),
                 child: const Text(AppStrings.deleteDemoOrderAction),
@@ -1334,7 +1549,16 @@ class _OrdersPageState extends State<OrdersPage> {
     ));
   }
 
-  void _sync() {
+  Future<void> _sync() async {
+    final pending = await _live.syncPending(AppSession.clientCode, _session);
+    if (!mounted) return;
+    if (pending.isEmpty) {
+      await _live.open(_session, () {
+        if (mounted) setState(() {});
+      });
+    }
+    if (!mounted) return;
+    setState(() {});
     _openSheet(AppStrings.syncOrders, Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

@@ -43,6 +43,11 @@ class OrderRepositoryImpl implements OrderRepository {
   }
 
   @override
+  Future<Map<String, double>> dailyRates(String clientCode) {
+    return _remote.dailyRates(clientCode);
+  }
+
+  @override
   Future<Result<bool>> deleteOrder({
     required String clientCode,
     required int id,

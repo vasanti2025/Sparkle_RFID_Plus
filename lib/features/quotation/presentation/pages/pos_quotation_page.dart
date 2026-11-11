@@ -13,6 +13,7 @@ import '../../domain/entities/customer_record.dart';
 import '../../domain/entities/quotation_detail.dart';
 import '../../domain/entities/quotation_draft.dart';
 import '../../domain/entities/quotation_field.dart';
+import '../../../orders/domain/order_math.dart';
 import '../../domain/quotation_math.dart';
 import '../../domain/entities/stock_item.dart';
 import '../widgets/quotation_items_popup.dart';
@@ -47,6 +48,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   final _tray = RfidTrayScan();
   var _summaryPopup = false;
   var _gstOn = true;
+  var _orderRefreshQueued = false;
+  QuotationField? _orderEditedField;
+  Map<String, double> _purityRates = const {};
   String? _error;
   int _quotationId = 0;
   String _quotationNo = '';
@@ -130,6 +134,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       pageName: widget.orderMode ? AppConstants.orderPageName : AppConstants.quotationPageName,
     );
     final customers = await Injection.quotations.loadCustomers(_clientCode);
+    if (widget.orderMode && _clientCode.isNotEmpty) {
+      _purityRates = await Injection.orders.dailyRates(_clientCode);
+    }
     if (!mounted) return;
     setState(() {
       _loading = false;
@@ -194,6 +201,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       _seenTags = 0;
     });
     final read = await _tray.collect(
+      fast: widget.orderMode,
       onCount: (count) {
         if (mounted) setState(() => _seenTags = count);
       },
@@ -209,7 +217,11 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       return;
     }
 
-    final matches = await Injection.quotations.stockForTags(_clientCode, read.codes);
+    final matches = await Injection.quotations.stockForTags(
+      _clientCode,
+      read.codes,
+      tags: widget.orderMode ? read.tags : const [],
+    );
     if (!mounted) return;
     final added = <StockItem>[];
     for (final item in matches) {
@@ -252,22 +264,33 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   }
 
   void _useItem(StockItem raw) {
-    final item = withLinePrice(raw, priceLine(raw, applyGst: false, gstFraction: 0));
+    final item = widget.orderMode
+        ? priceOrderSelection(raw, purityRate: _purityRate(raw))
+        : withLinePrice(raw, priceLine(raw, applyGst: false, gstFraction: 0));
     _lookup.text = item.itemCode.isEmpty ? item.rfid : item.itemCode;
     for (final field in _gridFields) {
       final value = _valueFor(field, item);
       if (value == null) continue;
       _fields[field.key]?.text = value;
     }
-    if (_items.any((current) => current.identity == item.identity)) {
-      setState(() {});
+    final existing = _items.indexWhere((current) => current.identity == item.identity);
+    if (existing >= 0) {
+      setState(() {
+        if (widget.orderMode) _items[existing] = item;
+      });
       return;
     }
     setState(() => _items.add(item));
   }
 
+  double _purityRate(StockItem item) {
+    final purity = (item.extras['purity'] ?? item.extras['purityname'] ?? '').trim().toLowerCase();
+    if (purity.isEmpty) return 0;
+    return _purityRates[purity] ?? 0;
+  }
+
   String? _valueFor(QuotationField field, StockItem item) {
-    const aliases = <String, List<String>>{
+    final aliases = <String, List<String>>{
       'designname': ['designname', 'design'],
       'purity': ['purity'],
       'pieces': ['pieces', 'pcs', 'piece'],
@@ -284,6 +307,31 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'makingamt': ['makingamt', 'makingamount'],
       'itemamt': ['itemamt', 'itemamount', 'amount'],
     };
+    if (widget.orderMode) {
+      aliases['purity'] = ['purity', 'purityname'];
+      aliases['stonewt'] = ['stonewt', 'stoneweight', 'totalstoneweight', 'stone'];
+      aliases['diamondwt'] = ['diamondwt', 'diamondweight', 'totaldiamondweight', 'diamond'];
+      aliases['rate'] = ['rate', 'ratepergram', 'todaysrate', 'metalrate', 'goldrate'];
+      aliases['stoneamt'] = ['stoneamt', 'stoneamount', 'totalstoneamount'];
+      aliases['diamondamt'] = ['diamondamt', 'diamondamount', 'totaldiamondamount'];
+      aliases.addAll(const {
+        'ratepergram': ['rate', 'ratepergram', 'todaysrate'],
+        'todaysrate': ['rate', 'todaysrate', 'ratepergram'],
+        'hallmark': ['hallmarkamt', 'hallmarkamount'],
+        'hallmarkamt': ['hallmarkamt', 'hallmarkamount'],
+        'totalwt': ['totalwt', 'totalweight'],
+        'packingwt': ['packingwt', 'packingweight'],
+        'fineper': ['fineper', 'finepercentage'],
+        'wastage': ['wastage', 'makingpercent', 'makingpercentage'],
+        'finepluswt': ['finepluswt'],
+        'makingpergram': ['makingpergram'],
+        'makingpercent': ['makingpercent', 'makingpercentage'],
+        'makingfixed': ['makingfixedamt', 'fixmaking', 'makingfixed'],
+        'fixmaking': ['makingfixedamt', 'fixmaking'],
+        'sku': ['sku'],
+        'purityname': ['purity', 'purityname'],
+      });
+    }
     final names = <String>{
       field.keyToken,
       field.labelToken,
@@ -301,6 +349,13 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   List<StockItem> get _formItems => [for (final item in _items) _withGrid(item)];
 
   double get _itemAmount {
+    if (widget.orderMode) {
+      var total = 0.0;
+      for (final item in _formItems) {
+        total += orderAmount(item);
+      }
+      return total;
+    }
     var total = 0.0;
     for (final item in _formItems) {
       final line = priceLine(item, applyGst: _gstOn, gstFraction: _gstRate);
@@ -310,6 +365,15 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   }
 
   double get _gst {
+    if (widget.orderMode) {
+      if (!_gstOn) return 0;
+      var total = 0.0;
+      for (final item in _formItems) {
+        if (_readOrder(item, 'mrp') > 0) continue;
+        total += orderAmount(item);
+      }
+      return total * _gstRate;
+    }
     var total = 0.0;
     for (final item in _formItems) {
       final line = priceLine(item, applyGst: _gstOn, gstFraction: _gstRate);
@@ -352,7 +416,12 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         if (token.isEmpty) continue;
         extras[token] = text;
       }
-      final key = _inputKey(field.labelToken) ?? _inputKey(field.keyToken);
+      final key = widget.orderMode
+          ? (_orderInputKey(field.labelToken) ??
+              _orderInputKey(field.keyToken) ??
+              _inputKey(field.labelToken) ??
+              _inputKey(field.keyToken))
+          : (_inputKey(field.labelToken) ?? _inputKey(field.keyToken));
       if (key == 'grosswt') gross = text;
       if (key == 'netwt') net = text;
       if (key == 'designname') design = text;
@@ -409,7 +478,66 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     return keys[token];
   }
 
-  void _refreshCalculatedFields() {
+  String? _orderInputKey(String token) {
+    const keys = {
+      'hallmark': 'hallmarkamt',
+      'hallmarkamt': 'hallmarkamt',
+      'hallmarkamount': 'hallmarkamt',
+      'totalwt': 'totalwt',
+      'totalweight': 'totalwt',
+      'packingwt': 'packingwt',
+      'packingweight': 'packingwt',
+      'fineper': 'fineper',
+      'finepercentage': 'fineper',
+      'wastage': 'wastage',
+      'finepluswt': 'finepluswt',
+      'itemamt': 'itemamt',
+      'itemamount': 'itemamt',
+      'amount': 'itemamt',
+      'metalamt': 'metalamt',
+      'metalamount': 'metalamt',
+      'makingamt': 'makingamt',
+      'makingamount': 'makingamt',
+      'ratepergram': 'rate',
+      'todaysrate': 'rate',
+      'makingpergram': 'makingpergram',
+      'makingpercentage': 'makingpercent',
+      'fixmaking': 'makingfixedamt',
+      'makingfixed': 'makingfixedamt',
+      'fixwastage': 'makingfixedwastage',
+      'sku': 'sku',
+      'purityname': 'purity',
+      'totalstoneweight': 'stonewt',
+      'totaldiamondweight': 'diamondwt',
+      'totalstoneamount': 'stoneamt',
+      'totaldiamondamount': 'diamondamt',
+    };
+    return keys[token] ?? _inputKey(token);
+  }
+
+  double _readOrder(StockItem item, String key) {
+    return double.tryParse((item.extras[key] ?? '').replaceAll(',', '').trim()) ?? 0;
+  }
+
+  void _queueOrderRefresh(QuotationField field) {
+    _orderEditedField = field;
+    if (_orderRefreshQueued) return;
+    _orderRefreshQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _orderRefreshQueued = false;
+      if (!mounted) return;
+      final edited = _orderEditedField;
+      _orderEditedField = null;
+      _refreshOrderFields(edited);
+      setState(() {});
+    });
+  }
+
+  void _refreshCalculatedFields({QuotationField? edited}) {
+    if (widget.orderMode) {
+      _refreshOrderFields(edited);
+      return;
+    }
     final index = _items.indexWhere(_isFormItem);
     if (index < 0) return;
     final current = _withGrid(_items[index]);
@@ -419,6 +547,26 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     );
     for (final field in _gridFields) {
       if (!field.showsAsValue && !field.readOnly) continue;
+      final value = _valueFor(field, priced);
+      if (value == null) continue;
+      final controller = _fields[field.key];
+      if (controller != null && controller.text != value) controller.text = value;
+    }
+  }
+
+  void _refreshOrderFields(QuotationField? edited) {
+    final index = _items.indexWhere(_isFormItem);
+    if (index < 0) return;
+    final editedToken = edited == null
+        ? ''
+        : (_orderInputKey(edited.labelToken) ?? _orderInputKey(edited.keyToken) ?? '');
+    final priced = priceOrderEdit(_withGrid(_items[index]), lockGross: editedToken == 'grosswt');
+    _items[index] = priced;
+    const derived = {'netwt', 'itemamt', 'metalamt', 'finepluswt', 'grosswt'};
+    for (final field in _gridFields) {
+      if (edited != null && field.key == edited.key) continue;
+      final token = _orderInputKey(field.labelToken) ?? _orderInputKey(field.keyToken) ?? field.keyToken;
+      if (!derived.contains(token)) continue;
       final value = _valueFor(field, priced);
       if (value == null) continue;
       final controller = _fields[field.key];
@@ -670,7 +818,11 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         TextField(
           controller: controller,
           onChanged: (_) {
-            _refreshCalculatedFields();
+            if (widget.orderMode) {
+              _queueOrderRefresh(field);
+              return;
+            }
+            _refreshCalculatedFields(edited: field);
             setState(() {});
           },
           keyboardType: _numeric(field)

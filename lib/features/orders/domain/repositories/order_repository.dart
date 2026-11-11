@@ -17,6 +17,8 @@ abstract class OrderRepository {
 
   void rememberCustomer({required String number, required String customerName});
 
+  Future<Map<String, double>> dailyRates(String clientCode);
+
   Future<Result<bool>> deleteOrder({
     required String clientCode,
     required int id,
