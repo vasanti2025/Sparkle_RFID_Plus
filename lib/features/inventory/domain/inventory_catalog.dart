@@ -7,9 +7,14 @@ class InventoryPiece {
     required this.milligrams,
     this.rfid,
     this.epc,
+    this.tid,
     this.netMilligrams,
     this.purity,
     this.weightKnown = true,
+    this.counter,
+    this.box,
+    this.branch,
+    this.branchType,
   });
 
   final String id;
@@ -19,9 +24,14 @@ class InventoryPiece {
   final int milligrams;
   final String? rfid;
   final String? epc;
+  final String? tid;
   final int? netMilligrams;
   final String? purity;
   final bool weightKnown;
+  final String? counter;
+  final String? box;
+  final String? branch;
+  final String? branchType;
 
   String get name => product ?? 'Jewellery item';
 }

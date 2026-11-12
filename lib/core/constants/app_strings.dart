@@ -46,6 +46,14 @@ abstract final class AppStrings {
   static const clearerStockCheck = 'A CLEARER STOCK CHECK';
   static const whereAreYouCounting = 'Where are you\ncounting?';
   static const chooseAScope = 'Choose a scope. Scan the jewellery.\nReview the result.';
+  static const startingReader = 'Starting the reader';
+  static const localStock = 'LOCAL STOCK';
+  static const syncProductsFirst = 'Sync products first. This count uses stock saved on the device.';
+  static const noScopeValues = 'No saved locations for this scan yet.';
+  static const pleaseWaitItemsLoading = 'Please wait, items are still loading';
+  static const noItemsInCurrentScope = 'No items in current scope';
+  static const allItemsMatchedScanStopped = 'All items matched. Scan stopped.';
+  static const listeningForTag = 'Listening for the tag';
   static const scanDisplay = 'Scan display';
   static const scanDisplayHint = 'Check display stock';
   static const scanCounter = 'Scan counter';
