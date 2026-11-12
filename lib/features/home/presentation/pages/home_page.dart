@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
@@ -222,10 +223,11 @@ class _ReaderStatus extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        Text(
-          AppStrings.demoWorkspace,
-          style: _text(size: AppTypography.label, color: AppColors.muted),
-        ),
+        if (AppSession.clientCode.isNotEmpty)
+          Text(
+            AppSession.clientCode,
+            style: _text(size: AppTypography.label, color: AppColors.muted),
+          ),
       ],
     );
   }

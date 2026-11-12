@@ -38,9 +38,6 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
   static const _bar = Color(0xFFDCD7CA);
   static const _barOn = Color(0xFFB08630);
   static const _barFound = Color(0xFF35724D);
-  static const _secondaryFill = Color(0xFFF2EEE4);
-  static const _secondaryInk = Color(0xFF755722);
-  static const _secondaryLine = Color(0xFFE3D7BA);
   static const _symbolFill = Color(0xFFEDE6D6);
   static const _symbolInk = Color(0xFF87652A);
   static const _fieldLine = Color(0xFFDCD8D0);
@@ -182,7 +179,7 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _pillTag(AppStrings.workflowPreview),
+        _pillTag(AppStrings.localStock),
         Text(
           AppStrings.chooseProductOrTag,
           style: _text(size: 13, color: _muted, height: 1.65),
@@ -281,23 +278,8 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
             padding: EdgeInsets.only(bottom: 12),
             child: LinearProgressIndicator(color: Color(0xFFB08630), backgroundColor: Color(0xFFE8E0D2)),
           ),
-        OutlinedButton(
-          onPressed: () => setState(() {
-            _strong = true;
-            _bars = 10;
-          }),
-          style: OutlinedButton.styleFrom(
-            backgroundColor: _secondaryFill,
-            foregroundColor: _secondaryInk,
-            side: const BorderSide(color: _secondaryLine),
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
-            textStyle: _text(size: 15, weight: FontWeight.w600, color: _secondaryInk),
-          ),
-          child: const Text(AppStrings.simulateStronger),
-        ),
         TextButton(
-          onPressed: () => setState(() => _step = _FindStep.verify),
+          onPressed: _strong ? () => setState(() => _step = _FindStep.verify) : null,
           style: TextButton.styleFrom(
             foregroundColor: const Color(0xFF716044),
             minimumSize: const Size.fromHeight(48),

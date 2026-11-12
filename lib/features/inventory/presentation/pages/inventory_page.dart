@@ -60,14 +60,11 @@ class _InventoryPageState extends State<InventoryPage> {
   final _listQuery = TextEditingController();
   final _findQuery = TextEditingController();
 
-  List<String> get _categoryOptions =>
-      InventoryStock.instance.ready ? InventoryStock.instance.categories : InventoryCatalog.categories;
+  List<String> get _categoryOptions => InventoryStock.instance.categories;
 
-  List<String> get _productOptions =>
-      InventoryStock.instance.ready ? InventoryStock.instance.products : InventoryCatalog.products;
+  List<String> get _productOptions => InventoryStock.instance.products;
 
-  List<String> get _designOptions =>
-      InventoryStock.instance.ready ? InventoryStock.instance.designs : InventoryCatalog.designs;
+  List<String> get _designOptions => InventoryStock.instance.designs;
 
   @override
   void initState() {
@@ -86,19 +83,13 @@ class _InventoryPageState extends State<InventoryPage> {
     super.dispose();
   }
 
-  List<InventoryPiece> get _expected => InventoryStock.instance.ready
-      ? InventoryStock.instance.select(
-          mode: _mode,
-          scope: _scope,
-          categoriesSelected: _categories,
-          productsSelected: _products,
-          designsSelected: _designs,
-        )
-      : InventoryCatalog.selected(
-          categoriesSelected: _categories,
-          productsSelected: _products,
-          designsSelected: _designs,
-        );
+  List<InventoryPiece> get _expected => InventoryStock.instance.select(
+    mode: _mode,
+    scope: _scope,
+    categoriesSelected: _categories,
+    productsSelected: _products,
+    designsSelected: _designs,
+  );
 
   List<InventoryPiece> get _matched =>
       _expected.where((item) => _reads.contains(item.id)).toList();
@@ -603,7 +594,7 @@ class _InventoryPageState extends State<InventoryPage> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.goldText),
                     )
                   else
-                    _tag(InventoryStock.instance.ready ? AppStrings.localStock : AppStrings.demoData),
+                    _tag(AppStrings.localStock),
                 ],
               ),
               const SizedBox(height: 14),
@@ -1099,24 +1090,6 @@ class _InventoryPageState extends State<InventoryPage> {
                 textAlign: TextAlign.center,
                 style: _text(size: 13, color: AppColors.muted),
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => setState(() => _signal = math.max(0, _signal - 2)),
-                      child: const Text(AppStrings.demoWeaker),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => setState(() => _signal = math.min(10, _signal + 2)),
-                      child: const Text(AppStrings.demoStronger),
-                    ),
-                  ),
-                ],
-              ),
               const SizedBox(height: 16),
               Text(AppStrings.signalIsGuide, style: _text(size: 14, weight: FontWeight.w700)),
               Text(AppStrings.signalGuideBody, style: _text(size: 13, color: AppColors.muted, height: 1.35)),
@@ -1436,7 +1409,7 @@ class _InventoryPageState extends State<InventoryPage> {
     if (id == null) return null;
     final stored = InventoryStock.instance.byId(id);
     if (stored != null) return stored;
-    for (final item in [..._expected, ..._unlabelled, ...InventoryCatalog.items]) {
+    for (final item in [..._expected, ..._unlabelled]) {
       if (item.id == id) return item;
     }
     return null;
