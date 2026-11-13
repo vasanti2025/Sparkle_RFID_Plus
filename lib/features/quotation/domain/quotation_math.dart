@@ -104,9 +104,54 @@ LinePrice priceLine(
   );
 }
 
+/// Fills net weight and the line amounts for a quotation item.
+///
+/// Net weight is gross minus stone weight minus diamond weight when a gross
+/// weight is present, unless the user is editing net weight itself.
+/// A purity rate is used only when one is supplied.
+StockItem priceQuotationEdit(
+  StockItem item, {
+  bool lockNet = false,
+  double purityRate = 0,
+}) {
+  final extras = Map<String, String>.from(item.extras);
+  final gross = _firstNum(item.gross, _num(item, const ['grosswt', 'grossweight']));
+  final stoneWeight = _num(item, const ['stonewt', 'stoneweight', 'totalstoneweight']);
+  final diamondWeight = _num(item, const ['diamondwt', 'diamondweight', 'totaldiamondweight']);
+  var net = _num(item, const ['netwt', 'netweight', 'nwt', 'netwtgm']);
+  if (net <= 0 && item.net.trim().isNotEmpty) {
+    net = double.tryParse(item.net.replaceAll(',', '').trim()) ?? 0;
+  }
+  if (!lockNet && gross > 0) {
+    net = gross - stoneWeight - diamondWeight;
+  }
+  if (net < 0) net = 0;
+  final netText = net.toStringAsFixed(3);
+  extras['netwt'] = netText;
+  extras['netweight'] = netText;
+  if (purityRate > 0) {
+    final rateText = purityRate.toStringAsFixed(2);
+    extras['rate'] = rateText;
+    extras['metalrate'] = rateText;
+    extras['goldrate'] = rateText;
+    extras['todaysrate'] = rateText;
+  }
+  final next = StockItem(
+    itemCode: item.itemCode,
+    name: item.name,
+    rfid: item.rfid,
+    gross: gross > 0 ? gross.toStringAsFixed(3) : item.gross,
+    net: netText,
+    design: item.design,
+    extras: extras,
+  );
+  return withLinePrice(next, priceLine(next, applyGst: false, gstFraction: 0));
+}
+
 StockItem withLinePrice(StockItem item, LinePrice line) {
   final extras = Map<String, String>.from(item.extras);
   extras['netwt'] = line.weight(line.net);
+  extras['netweight'] = extras['netwt']!;
   extras['metalamt'] = line.money(line.metal);
   extras['metalamount'] = line.money(line.metal);
   extras['makingamt'] = line.money(line.making);

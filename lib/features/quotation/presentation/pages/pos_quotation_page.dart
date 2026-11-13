@@ -485,7 +485,10 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   void _useItem(StockItem raw) {
     final item = widget.orderMode
         ? priceOrderSelection(raw, purityRate: _purityRate(raw))
-        : withLinePrice(raw, priceLine(raw, applyGst: false, gstFraction: 0));
+        : priceQuotationEdit(
+            raw,
+            purityRate: _stockRate(raw) > 0 ? 0 : _purityRate(raw),
+          );
     _lookup.text = item.itemCode.isEmpty ? item.rfid : item.itemCode;
     for (final field in _gridFields) {
       final value = _valueFor(field, item);
@@ -522,7 +525,15 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'grosswt': ['grosswt', 'grossweight', 'gross'],
       'stonewt': ['stonewt', 'stoneweight', 'stone'],
       'diamondwt': ['diamondwt', 'diamondweight', 'diamond'],
-      'netwt': ['netwt', 'netweight', 'netwtgm', 'net'],
+      'netwt': ['netwt', 'netweight', 'netwtgm', 'net', 'nwt'],
+      'netweight': ['netwt', 'netweight', 'netwtgm', 'net', 'nwt'],
+      'nwt': ['netwt', 'netweight', 'net', 'nwt'],
+      'netweightg': ['netwt', 'netweight', 'net'],
+      'metalamount': ['metalamt', 'metalamount'],
+      'makingamount': ['makingamt', 'makingamount', 'makingcharg'],
+      'makingcharg': ['makingamt', 'makingamount', 'makingcharg'],
+      'itemamount': ['itemamt', 'itemamount', 'totalitemamount', 'amount'],
+      'totalitemamount': ['itemamt', 'itemamount', 'totalitemamount', 'amount'],
       'making': ['making', 'makingpercent', 'makingplus'],
       'diamondpcs': ['diamondpcs', 'diamondpieces'],
       'rate': ['rate'],
@@ -584,8 +595,25 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       final value = item.extras[name];
       if (value != null && value.isNotEmpty) return value;
     }
+    if (_isNetWeightToken(field.keyToken) || _isNetWeightToken(field.labelToken)) {
+      final net = item.net.trim().isNotEmpty ? item.net.trim() : (item.extras['netwt'] ?? '');
+      if (net.isNotEmpty) return net;
+    }
     if (field.keyToken == 'pieces' || field.labelToken == 'pieces') return '1';
     return null;
+  }
+
+  bool _isNetWeightToken(String token) {
+    if (token.contains('amt') || token.contains('amount')) return false;
+    return token == 'net' || token == 'nwt' || token.contains('netwt') || token.contains('netweight');
+  }
+
+  double _stockRate(StockItem item) {
+    for (final key in const ['rate', 'metalrate', 'goldrate', 'todaysrate', 'ratepergram']) {
+      final value = double.tryParse((item.extras[key] ?? '').replaceAll(',', '').trim());
+      if (value != null && value > 0) return value;
+    }
+    return 0;
   }
 
   List<StockItem> get _formItems => [for (final item in _items) _withGrid(item)];
@@ -695,8 +723,11 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'diamondwt': 'diamondwt',
       'diamondweight': 'diamondwt',
       'net': 'netwt',
+      'nwt': 'netwt',
       'netwt': 'netwt',
       'netweight': 'netwt',
+      'netweightg': 'netwt',
+      'netwtgm': 'netwt',
       'rate': 'rate',
       'metalrate': 'rate',
       'goldrate': 'rate',
@@ -713,6 +744,15 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'stoneamount': 'stoneamt',
       'diamondamt': 'diamondamt',
       'diamondamount': 'diamondamt',
+      'metalamt': 'metalamt',
+      'metalamount': 'metalamt',
+      'makingamt': 'makingamt',
+      'makingamount': 'makingamt',
+      'makingcharg': 'makingamt',
+      'itemamt': 'itemamt',
+      'itemamount': 'itemamt',
+      'totalitemamount': 'itemamt',
+      'amount': 'itemamt',
       'pieces': 'pieces',
       'pcs': 'pieces',
       'purity': 'purity',
@@ -810,12 +850,20 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     final index = _items.indexWhere(_isFormItem);
     if (index < 0) return;
     final current = _withGrid(_items[index]);
-    final priced = withLinePrice(
+    final editedToken = edited == null ? '' : '${edited.keyToken} ${edited.labelToken}';
+    final priced = priceQuotationEdit(
       current,
-      priceLine(current, applyGst: false, gstFraction: 0),
+      lockNet: edited != null &&
+          (_isNetWeightToken(edited.keyToken) || _isNetWeightToken(edited.labelToken)),
+      purityRate: editedToken.contains('purity') ? _purityRate(current) : 0,
     );
+    _items[index] = priced;
+    const derived = {'netwt', 'metalamt', 'makingamt', 'itemamt', 'rate'};
     for (final field in _gridFields) {
-      if (!field.showsAsValue && !field.readOnly) continue;
+      if (edited != null && field.key == edited.key) continue;
+      final token = _inputKey(field.labelToken) ?? _inputKey(field.keyToken) ?? field.keyToken;
+      final netField = _isNetWeightToken(field.keyToken) || _isNetWeightToken(field.labelToken);
+      if (!derived.contains(token) && !netField) continue;
       final value = _valueFor(field, priced);
       if (value == null) continue;
       final controller = _fields[field.key];
@@ -1351,7 +1399,11 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     );
     if (selected == null || !mounted) return;
     controller.text = selected;
-    _queueOrderRefresh(field);
+    if (widget.orderMode) {
+      _queueOrderRefresh(field);
+    } else {
+      _refreshCalculatedFields(edited: field);
+    }
     setState(() {});
   }
 
