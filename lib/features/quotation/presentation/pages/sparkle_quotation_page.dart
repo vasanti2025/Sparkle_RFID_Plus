@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
@@ -182,7 +183,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(read.error ?? 'No tag found')),
+        SnackBar(content: Text(read.error ?? tr('No tag found'))),
       );
       return;
     }
@@ -222,7 +223,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
         _addItem(data.first);
       case Success():
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No matching item')),
+          SnackBar(content: Text(tr('No matching item'))),
         );
       case Error(:final failure):
         ScaffoldMessenger.of(context).showSnackBar(
@@ -241,18 +242,20 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return OrderQuotationScope(
+      child: Scaffold(
       backgroundColor: AppColors.homeSurface,
       appBar: AppBar(
         backgroundColor: AppColors.homeSurface,
         foregroundColor: AppColors.charcoal,
         elevation: 0,
-        title: const Column(
+        actions: const [LanguageButton()],
+        title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(AppStrings.newQuotation),
+            Text(tr(AppStrings.newQuotation)),
             Text(
-              'Customer → pieces → review',
+              tr('Customer → pieces → review'),
               style: TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w500),
             ),
           ],
@@ -281,9 +284,9 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                     Expanded(
                       child: TextField(
                         controller: _lookup,
-                        decoration: const InputDecoration(
-                          hintText: AppStrings.rfidOrItemCode,
-                          prefixIcon: Icon(Icons.search),
+                        decoration: InputDecoration(
+                          hintText: tr(AppStrings.rfidOrItemCode),
+                          prefixIcon: const Icon(Icons.search),
                         ),
                         onChanged: _onLookupChanged,
                         onSubmitted: (_) => _scanLookup(),
@@ -310,7 +313,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                 Row(
                   children: [
                     Text(
-                      AppStrings.selectedJewellery.toUpperCase(),
+                      tr(AppStrings.selectedJewellery).toUpperCase(),
                       style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -333,9 +336,9 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                 const SizedBox(height: 12),
                 const _PricePending(),
                 const SizedBox(height: 8),
-                const Text(
-                  'A price proposal. It does not move stock.',
-                  style: TextStyle(color: AppColors.muted, fontSize: 12),
+                Text(
+                  tr('A price proposal. It does not move stock.'),
+                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
                 ),
               ],
             ),
@@ -345,11 +348,12 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
             gross: _gross,
             onScan: _readTagIntoQuotation,
             scanning: _readingTag,
-            scanLabel: _readingTag ? (_seenTags == 0 ? 'Scanning' : 'Scan $_seenTags') : 'Scan',
+            scanLabel: _readingTag ? (_seenTags == 0 ? tr('Scanning') : '${tr('Scan')} $_seenTags') : tr('Scan'),
             onReview: _review,
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -357,13 +361,13 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
     final selected = await showModalBottomSheet<CustomerRecord>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _CustomerSheet(
+      builder: (context) => oqDirection(_CustomerSheet(
         index: _customers,
         clientCode: _clientCode,
         onCreated: (record) {
           setState(() => _customers = _customers.add(record));
         },
-      ),
+      )),
     );
     if (selected != null) setState(() => _customer = selected);
   }
@@ -380,18 +384,18 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheet) {
-            return Padding(
+            return oqDirection(Padding(
               padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + MediaQuery.viewInsetsOf(context).bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Document details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text(tr('Document details'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 12),
-                  TextField(controller: branch, decoration: const InputDecoration(labelText: 'Branch')),
+                  TextField(controller: branch, decoration: InputDecoration(labelText: tr('Branch'))),
                   TextField(
                     readOnly: true,
-                    decoration: InputDecoration(labelText: 'Document date', hintText: _formatDate(docDate)),
+                    decoration: InputDecoration(labelText: tr('Document date'), hintText: _formatDate(docDate)),
                     onTap: () async {
                       final picked = await showDatePicker(
                         context: context,
@@ -404,7 +408,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                   ),
                   TextField(
                     readOnly: true,
-                    decoration: InputDecoration(labelText: 'Valid until', hintText: _formatDate(validUntil)),
+                    decoration: InputDecoration(labelText: tr('Valid until'), hintText: _formatDate(validUntil)),
                     onTap: () async {
                       final picked = await showDatePicker(
                         context: context,
@@ -415,25 +419,25 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
                       if (picked != null) setSheet(() => validUntil = picked);
                     },
                   ),
-                  TextField(controller: reference, decoration: const InputDecoration(labelText: 'Reference')),
-                  TextField(controller: notes, decoration: const InputDecoration(labelText: 'Notes')),
+                  TextField(controller: reference, decoration: InputDecoration(labelText: tr('Reference'))),
+                  TextField(controller: notes, decoration: InputDecoration(labelText: tr('Notes'))),
                   const SizedBox(height: 12),
                   FilledButton(
                     style: FilledButton.styleFrom(backgroundColor: AppColors.charcoal),
                     onPressed: () {
                       if (validUntil.isBefore(docDate)) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Valid-until date cannot be before the document date.')),
+                          SnackBar(content: Text(tr('Valid-until date cannot be before the document date.'))),
                         );
                         return;
                       }
                       Navigator.pop(context, true);
                     },
-                    child: const Text('Apply details'),
+                    child: Text(tr('Apply details')),
                   ),
                 ],
               ),
-            );
+            ));
           },
         );
       },
@@ -455,7 +459,7 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
   void _review() {
     if (_customer == null || _items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Choose a customer and add at least one piece.')),
+        SnackBar(content: Text(tr('Choose a customer and add at least one piece.'))),
       );
       return;
     }
@@ -463,40 +467,40 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
       context: context,
       isScrollControlled: true,
       builder: (context) {
-        return Padding(
+        return oqDirection(Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Review quotation', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(tr('Review quotation'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 12),
-              _reviewLine('Customer', _customer!.name),
-              _reviewLine('Branch', _branch.text.isEmpty ? 'Not set' : _branch.text),
-              _reviewLine('Valid until', _formatDate(_validUntil)),
-              _reviewLine('Pieces / gross', '${_items.length} / ${_gross.toStringAsFixed(3)} g'),
+              _reviewLine(tr('Customer'), _customer!.name),
+              _reviewLine(tr('Branch'), _branch.text.isEmpty ? tr('Not set') : _branch.text),
+              _reviewLine(tr('Valid until'), _formatDate(_validUntil)),
+              _reviewLine(tr('Pieces / gross'), '${_items.length} / ${_gross.toStringAsFixed(3)} g'),
               const SizedBox(height: 8),
               const _PricePending(),
               const SizedBox(height: 8),
-              const Text(
-                'A price proposal. It does not move stock.',
-                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              Text(
+                tr('A price proposal. It does not move stock.'),
+                style: const TextStyle(color: AppColors.muted, fontSize: 12),
               ),
               const SizedBox(height: 12),
               FilledButton(
                 style: FilledButton.styleFrom(backgroundColor: AppColors.charcoal),
                 onPressed: _saving ? null : _saveQuotation,
-                child: Text(_quotationId > 0 ? 'Update' : 'Save'),
+                child: Text(_quotationId > 0 ? tr('Update') : tr('Save')),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Draft only. No stock or order is changed.',
+              Text(
+                tr('Draft only. No stock or order is changed.'),
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.muted, fontSize: 12),
+                style: const TextStyle(color: AppColors.muted, fontSize: 12),
               ),
             ],
           ),
-        );
+        ));
       },
     );
   }
@@ -645,7 +649,7 @@ class _DetailsLink extends StatelessWidget {
                 ],
               ),
             ),
-            const Text('Details', style: TextStyle(color: AppColors.goldText, fontWeight: FontWeight.w700)),
+            Text(tr('Details'), style: const TextStyle(color: AppColors.goldText, fontWeight: FontWeight.w700)),
             const Icon(Icons.tune, color: AppColors.goldText, size: 18),
           ],
         ),
@@ -666,10 +670,10 @@ class _PricePending extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.cardBorder),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Expanded(child: Text('Document amount')),
-          Text('Pricing pending', style: TextStyle(fontWeight: FontWeight.w700)),
+          Expanded(child: Text(tr('Document amount'))),
+          Text(tr('Pricing pending'), style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -713,15 +717,15 @@ class _EmptyPieces extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 28),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28),
       child: Column(
         children: [
-          Icon(Icons.diamond_outlined, color: AppColors.goldText, size: 36),
-          SizedBox(height: 8),
-          Text(AppStrings.noPiecesYet, style: TextStyle(fontWeight: FontWeight.w700)),
-          SizedBox(height: 4),
-          Text(AppStrings.scanOrSelect, style: TextStyle(color: AppColors.muted)),
+          const Icon(Icons.diamond_outlined, color: AppColors.goldText, size: 36),
+          const SizedBox(height: 8),
+          Text(tr(AppStrings.noPiecesYet), style: const TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Text(tr(AppStrings.scanOrSelect), style: const TextStyle(color: AppColors.muted)),
         ],
       ),
     );
@@ -811,7 +815,7 @@ class _Footer extends StatelessWidget {
                         minimumSize: const Size.fromHeight(AppTypography.minTouch),
                       ),
                       onPressed: count == 0 ? null : onReview,
-                      child: const Text(AppStrings.reviewQuotation),
+                      child: Text(tr(AppStrings.reviewQuotation)),
                     ),
                   ),
                 ],
@@ -871,9 +875,9 @@ class _CustomerSheetState extends State<_CustomerSheet> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
               controller: _query,
-              decoration: const InputDecoration(
-                hintText: 'Customer name',
-                prefixIcon: Icon(Icons.search),
+              decoration: InputDecoration(
+                hintText: tr('Customer name'),
+                prefixIcon: const Icon(Icons.search),
               ),
               onChanged: (value) {
                 setState(() {
@@ -893,7 +897,7 @@ class _CustomerSheetState extends State<_CustomerSheet> {
                 return ListTile(
                   leading: const Icon(Icons.person_outline),
                   title: Text(customer.name),
-                  subtitle: Text(customer.mobile.isEmpty ? 'No mobile' : customer.mobile),
+                  subtitle: Text(customer.mobile.isEmpty ? tr('No mobile') : customer.mobile),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => Navigator.pop(context, customer),
                 );
@@ -905,7 +909,7 @@ class _CustomerSheetState extends State<_CustomerSheet> {
             child: TextButton.icon(
               onPressed: () => _addCustomer(context),
               icon: const Icon(Icons.add),
-              label: const Text(AppStrings.addCustomer),
+              label: Text(tr(AppStrings.addCustomer)),
             ),
           ),
         ],

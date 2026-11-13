@@ -42,6 +42,7 @@ class QuotationRepositoryImpl implements QuotationRepository {
     String city = '',
     String state = '',
     String country = '',
+    int branchId = 0,
   }) {
     return _guard(
       () => _remote.addCustomer(
@@ -55,8 +56,14 @@ class QuotationRepositoryImpl implements QuotationRepository {
         city: city,
         state: state,
         country: country,
+        branchId: branchId,
       ),
     );
+  }
+
+  @override
+  Future<Result<List<({int id, String name})>>> loadBranches(String clientCode) {
+    return _guard(() => _remote.loadBranches(clientCode));
   }
 
   @override

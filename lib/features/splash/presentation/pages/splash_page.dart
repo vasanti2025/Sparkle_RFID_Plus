@@ -44,6 +44,8 @@ class _SplashPageState extends State<SplashPage> {
           clientCode: user.clientCode,
           userId: user.id,
           token: user.token,
+          branchId: user.branchId,
+          branchName: user.branchName,
         );
         unawaited(Injection.productSync.start(user));
         Navigator.of(context).pushReplacement(

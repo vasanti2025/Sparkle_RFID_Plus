@@ -117,6 +117,9 @@ class OrderRemoteDataSource {
     required List<StockItem> items,
     required bool gstApplied,
     required double gstRate,
+    double discount = 0,
+    DateTime? orderDate,
+    DateTime? deliveryDate,
     int id = 0,
     String number = '',
     Map<String, dynamic> source = const {},
@@ -128,6 +131,9 @@ class OrderRemoteDataSource {
       items: items,
       gstApplied: gstApplied,
       gstRate: gstRate,
+      discount: discount,
+      orderDate: orderDate,
+      deliveryDate: deliveryDate,
       id: id,
       number: orderNo,
       source: source,
@@ -157,6 +163,9 @@ class OrderRemoteDataSource {
     required List<StockItem> items,
     required bool gstApplied,
     required double gstRate,
+    required double discount,
+    DateTime? orderDate,
+    DateTime? deliveryDate,
     required int id,
     required String number,
     required Map<String, dynamic> source,
@@ -165,8 +174,10 @@ class OrderRemoteDataSource {
     final first = names.isEmpty ? '' : names.first;
     final last = names.length > 1 ? names.sublist(1).join(' ') : '';
     final now = DateTime.now();
-    final orderDate = isoOffset(now);
-    final deliver = _dateOnly(now);
+    final stamp = orderDate ?? now;
+    final deliverOn = deliveryDate ?? stamp;
+    final dated = isoOffset(stamp);
+    final deliver = _dateOnly(deliverOn);
     final priced = items;
     final lines = [
       for (final item in priced)
@@ -178,7 +189,8 @@ class OrderRemoteDataSource {
     // RFID_Flutter create always sends GST off. Update keeps the form GST.
     final wantGst = id > 0 && gstApplied;
     final gst = wantGst ? lines.where((line) => !line.mrp).fold<double>(0, (sum, line) => sum + line.gst) : 0.0;
-    final net = base + gst;
+    final cut = discount < 0 ? 0.0 : discount;
+    final net = base + gst - cut;
     final employeeId = int.tryParse(AppSession.userId) ?? 0;
     final status = _text(source, const ['OrderStatus']);
     final orderItems = <Map<String, dynamic>>[];
@@ -192,7 +204,7 @@ class OrderRemoteDataSource {
           customer: customer,
           orderId: id,
           orderNo: number,
-          orderDate: orderDate,
+          orderDate: dated,
           deliver: deliver,
           employeeId: employeeId,
           status: status.isEmpty ? 'Order Received' : status,
@@ -208,28 +220,28 @@ class OrderRemoteDataSource {
       'CustomerId': customer.id.toString(),
       'ClientCode': clientCode,
       'OrderId': 0,
-      'TotalAmount': wantGst ? money : baseText,
+      'TotalAmount': money,
       'PaymentMode': '',
       'Qty': '${priced.length}',
       'GST': wantGst ? 'true' : '0',
       'OrderStatus': status.isEmpty ? 'Order Received' : status,
       'GSTApplied': wantGst ? 'true' : 'false',
-      'Discount': '0',
+      'Discount': cut == 0 ? '0' : cut.toStringAsFixed(2),
       'TotalNetAmount': baseText,
       'TotalGSTAmount': gst.toStringAsFixed(2),
-      'TotalPurchaseAmount': wantGst ? money : baseText,
+      'TotalPurchaseAmount': money,
       'ReceivedAmount': '0',
       'TotalBalanceMetal': '0',
-      'BalanceAmount': wantGst ? money : baseText,
+      'BalanceAmount': money,
       'TotalFineMetal': '0',
-      'OrderDate': orderDate,
+      'OrderDate': dated,
       'OrderCount': '${priced.length}',
       'AdditionTaxApplied': wantGst ? 'true' : 'false',
       'OrderNo': number,
       'BillType': 'SampleOut',
       'BilledBy': '',
       'SoldBy': '',
-      'BalanceAmt': wantGst ? money : baseText,
+      'BalanceAmt': money,
       'FinancialYear': _financialYear(now),
       'BaseCurrency': 'INR',
       'TotalStoneWeight': _sum(priced, const ['stonewt', 'stoneweight']).toString(),
@@ -243,7 +255,7 @@ class OrderRemoteDataSource {
       'PaidMetal': '0',
       'PaidAmount': '0',
       'TaxableAmount': baseText,
-      'CreatedOn': orderDate,
+      'CreatedOn': dated,
       'StatusType': true,
       'FineMetal': '0',
       'BalanceMetal': '0',
@@ -338,6 +350,9 @@ class OrderRemoteDataSource {
       'DiamondAmount': line.diamond.toStringAsFixed(2),
       'StoneAmount': line.stone.toStringAsFixed(2),
       'MetalAmount': line.metal.toStringAsFixed(2),
+      'TypesOdColors': pick(const ['typesodcolors', 'color', 'colour', 'typesofcolor', 'typeofcolor']),
+      'ScrewType': pick(const ['screwtype', 'screw']),
+      'Polish': pick(const ['polish', 'polishtype']),
       'ItemCode': item.itemCode,
       'CustomerId': customer.id,
       'CustomerName': customer.name,
@@ -404,6 +419,11 @@ class OrderRemoteDataSource {
     _alias(extras, 'stoneamount', 'stoneamt');
     _alias(extras, 'diamondamount', 'diamondamt');
     _alias(extras, 'amount', 'itemamt');
+    _alias(extras, 'typesodcolors', 'color');
+    _alias(extras, 'typesofcolor', 'color');
+    _alias(extras, 'typeofcolor', 'color');
+    _alias(extras, 'screwtype', 'screw');
+    _alias(extras, 'polishtype', 'polish');
     final code = itemCode.isNotEmpty
         ? itemCode
         : (rfid.isNotEmpty ? rfid : 'line-${index + 1}');

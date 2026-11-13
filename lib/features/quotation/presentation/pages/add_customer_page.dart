@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/location/country_state_service.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -35,9 +36,12 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
 
   List<String> _countries = const [];
   List<String> _states = const [];
+  List<({int id, String name})> _branches = const [];
   String? _country;
   String? _state;
+  int? _branchId;
   var _loadingCountries = true;
+  var _loadingBranches = true;
   var _loadingStates = false;
   var _saving = false;
   String? _locationError;
@@ -46,6 +50,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
   void initState() {
     super.initState();
     _loadCountries();
+    _loadBranches();
   }
 
   @override
@@ -58,6 +63,45 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
     _street.dispose();
     _city.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBranches() async {
+    final clientCode = AppSession.clientCode;
+    if (clientCode.isEmpty) {
+      if (!mounted) return;
+      setState(() => _loadingBranches = false);
+      return;
+    }
+    final result = await Injection.quotations.loadBranches(clientCode);
+    if (!mounted) return;
+    final branches = switch (result) {
+      Success(:final data) => [...data],
+      Error() => <({int id, String name})>[],
+    };
+    final loginId = AppSession.branchId;
+    if (loginId > 0 && !branches.any((branch) => branch.id == loginId)) {
+      final name = AppSession.branchName.isEmpty ? tr('Branch') : AppSession.branchName;
+      branches.insert(0, (id: loginId, name: name));
+    }
+    setState(() {
+      _branches = branches;
+      _branchId = _defaultBranchId(branches);
+      _loadingBranches = false;
+    });
+  }
+
+  int? _defaultBranchId(List<({int id, String name})> branches) {
+    final loginId = AppSession.branchId;
+    for (final branch in branches) {
+      if (branch.id == loginId) return branch.id;
+    }
+    final loginName = AppSession.branchName.trim().toLowerCase();
+    if (loginName.isNotEmpty) {
+      for (final branch in branches) {
+        if (branch.name.trim().toLowerCase() == loginName) return branch.id;
+      }
+    }
+    return branches.isEmpty ? null : branches.first.id;
   }
 
   Future<void> _loadCountries() async {
@@ -125,27 +169,28 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
     setState(() {
       _country = preferred;
       _state = null;
+      _branchId = _defaultBranchId(_branches);
     });
     if (preferred != null) _loadStates(preferred);
   }
 
   String? _validateName(String? value) {
     final name = value?.trim() ?? '';
-    if (name.isEmpty) return 'Customer name is required';
+    if (name.isEmpty) return tr('Customer name is required');
     if (name.length < 2 || RegExp(r'\d').hasMatch(name)) {
-      return 'Enter a valid customer name';
+      return tr('Enter a valid customer name');
     }
     return null;
   }
 
   String? _validateMobile(String? value) {
     final mobile = value?.trim() ?? '';
-    if (mobile.isEmpty) return 'Mobile number is required';
-    if (!RegExp(r'^\d+$').hasMatch(mobile)) return 'Enter a valid mobile number';
+    if (mobile.isEmpty) return tr('Mobile number is required');
+    if (!RegExp(r'^\d+$').hasMatch(mobile)) return tr('Enter a valid mobile number');
     if ((_country ?? '') == 'India') {
-      if (mobile.length != 10) return 'Enter a 10-digit mobile number';
+      if (mobile.length != 10) return tr('Enter a 10-digit mobile number');
     } else if (mobile.length < 6 || mobile.length > 15) {
-      return 'Enter a valid mobile number';
+      return tr('Enter a valid mobile number');
     }
     return null;
   }
@@ -154,7 +199,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
     final email = value?.trim() ?? '';
     if (email.isEmpty) return null;
     if (!email.contains('@') || !_emailPattern.hasMatch(email)) {
-      return 'Enter a valid email';
+      return tr('Enter a valid email');
     }
     return null;
   }
@@ -162,28 +207,28 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
   String? _validatePan(String? value) {
     final pan = value?.trim().toUpperCase() ?? '';
     if (pan.isEmpty) return null;
-    if (!_panPattern.hasMatch(pan)) return 'Enter a valid PAN number';
+    if (!_panPattern.hasMatch(pan)) return tr('Enter a valid PAN number');
     return null;
   }
 
   String? _validateGst(String? value) {
     final gst = value?.trim().toUpperCase() ?? '';
     if (gst.isEmpty) return null;
-    if (!_gstPattern.hasMatch(gst)) return 'Enter a valid GST number';
+    if (!_gstPattern.hasMatch(gst)) return tr('Enter a valid GST number');
     return null;
   }
 
   String? _validateStreet(String? value) {
     final street = value?.trim() ?? '';
     if (street.isEmpty) return null;
-    if (street.length < 3) return 'Enter a valid street';
+    if (street.length < 3) return tr('Enter a valid street');
     return null;
   }
 
   String? _validateCity(String? value) {
     final city = value?.trim() ?? '';
-    if (city.isEmpty) return 'City is required';
-    if (city.length < 2 || RegExp(r'\d').hasMatch(city)) return 'Enter a valid city';
+    if (city.isEmpty) return tr('City is required');
+    if (city.length < 2 || RegExp(r'\d').hasMatch(city)) return tr('Enter a valid city');
     return null;
   }
 
@@ -191,13 +236,13 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
     if (_saving) return;
     final valid = _formKey.currentState?.validate() ?? false;
     if (_country == null || _country!.isEmpty) {
-      setState(() => _locationError = 'Select a country');
+      setState(() => _locationError = tr('Select a country'));
       return;
     }
     if (!valid) return;
     final clientCode = AppSession.clientCode;
     if (clientCode.isEmpty) {
-      _message('Sign in again to add a customer');
+      _message(tr('Sign in again to add a customer'));
       return;
     }
     setState(() => _saving = true);
@@ -215,6 +260,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
       city: _city.text.trim(),
       state: _state?.trim() ?? '',
       country: _country!.trim(),
+      branchId: _branchId ?? 0,
     );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -232,12 +278,14 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return OrderQuotationScope(
+      child: Scaffold(
       backgroundColor: AppColors.homeSurface,
       appBar: AppBar(
         backgroundColor: AppColors.charcoal,
         foregroundColor: Colors.white,
-        title: const Text('Add Customer'),
+        title: Text(tr('Add Customer')),
+        actions: const [LanguageButton(light: true)],
       ),
       body: Form(
         key: _formKey,
@@ -246,16 +294,13 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
           children: [
             _field(
               controller: _name,
-              hint: 'Customer Name',
+              hint: tr('Customer Name'),
               validator: _validateName,
               textCapitalization: TextCapitalization.words,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z .']")),
-              ],
             ),
             _field(
               controller: _mobile,
-              hint: 'Mobile Number',
+              hint: tr('Mobile Number'),
               validator: _validateMobile,
               keyboardType: TextInputType.phone,
               inputFormatters: [
@@ -265,13 +310,13 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
             ),
             _field(
               controller: _email,
-              hint: 'Email',
+              hint: tr('Email'),
               validator: _validateEmail,
               keyboardType: TextInputType.emailAddress,
             ),
             _field(
               controller: _pan,
-              hint: 'PAN Number',
+              hint: tr('PAN Number'),
               validator: _validatePan,
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [
@@ -282,7 +327,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
             ),
             _field(
               controller: _gst,
-              hint: 'GST Number',
+              hint: tr('GST Number'),
               validator: _validateGst,
               textCapitalization: TextCapitalization.characters,
               inputFormatters: [
@@ -293,7 +338,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
             ),
             _field(
               controller: _street,
-              hint: 'Street',
+              hint: tr('Street'),
               validator: _validateStreet,
               maxLines: 3,
               textCapitalization: TextCapitalization.sentences,
@@ -309,13 +354,11 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
             const SizedBox(height: 12),
             _field(
               controller: _city,
-              hint: 'City',
+              hint: tr('City'),
               validator: _validateCity,
               textCapitalization: TextCapitalization.words,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z .']")),
-              ],
             ),
+            _branchBox(),
             if (_locationError != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -337,7 +380,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     icon: const Icon(Icons.person_add_alt_1, size: 18),
-                    label: Text(_saving ? 'Saving' : 'Add Customer'),
+                    label: Text(_saving ? tr('Saving') : tr('Add Customer')),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -351,7 +394,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Reset'),
+                    label: Text(tr('Reset')),
                   ),
                 ),
               ],
@@ -359,6 +402,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
           ],
         ),
       ),
+    ),
     );
   }
 
@@ -386,6 +430,29 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
     );
   }
 
+  Widget _branchBox() {
+    final selected = _branches.any((branch) => branch.id == _branchId) ? _branchId : null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DropdownButtonFormField<int>(
+        key: ValueKey('branch-$selected-${_branches.length}-$_loadingBranches'),
+        initialValue: selected,
+        isExpanded: true,
+        hint: Text(_loadingBranches ? tr('Loading') : tr('Branch')),
+        items: [
+          for (final branch in _branches)
+            DropdownMenuItem(
+              value: branch.id,
+              child: Text(branch.name, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: _loadingBranches ? null : (value) => setState(() => _branchId = value),
+        validator: (value) => value == null ? tr('Select a branch') : null,
+        decoration: _decoration(tr('Branch')),
+      ),
+    );
+  }
+
   Widget _countryBox() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -393,7 +460,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
         key: ValueKey('country-${_country ?? ''}-${_countries.length}'),
         initialValue: _countries.contains(_country) ? _country : null,
         isExpanded: true,
-        hint: Text(_loadingCountries ? 'Loading' : 'Country'),
+        hint: Text(_loadingCountries ? tr('Loading') : tr('Country')),
         items: [
           for (final country in _countries)
             DropdownMenuItem(value: country, child: Text(country, overflow: TextOverflow.ellipsis)),
@@ -420,7 +487,7 @@ class _AddCustomerPageState extends State<AddCustomerPage> {
         key: ValueKey('state-${_state ?? ''}-${_states.length}-$_loadingStates'),
         initialValue: _states.contains(_state) ? _state : null,
         isExpanded: true,
-        hint: Text(_loadingStates ? 'Loading' : 'Select state'),
+        hint: Text(_loadingStates ? tr('Loading') : tr('Select state')),
         items: [
           for (final state in _states)
             DropdownMenuItem(value: state, child: Text(state, overflow: TextOverflow.ellipsis)),

@@ -99,6 +99,8 @@ class _LoginPageState extends State<LoginPage> {
           clientCode: data.clientCode,
           userId: data.id,
           token: data.token,
+          branchId: data.branchId,
+          branchName: data.branchName,
         );
         final notice = data.notice;
         if (notice != null && notice.isNotEmpty) {

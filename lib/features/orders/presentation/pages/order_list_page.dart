@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/result.dart';
@@ -46,7 +47,7 @@ class _OrderListPageState extends State<OrderListPage> {
     if (_clientCode.isEmpty) {
       setState(() {
         _waitingForFirst = false;
-        _error = 'Sign in to load orders.';
+        _error = tr('Sign in to load orders.');
       });
       return;
     }
@@ -54,7 +55,7 @@ class _OrderListPageState extends State<OrderListPage> {
       if (!mounted || _rows.isNotEmpty) return;
       setState(() {
         _waitingForFirst = false;
-        _error = 'Orders could not be loaded.';
+        _error = tr('Orders could not be loaded.');
       });
     });
   }
@@ -81,12 +82,12 @@ class _OrderListPageState extends State<OrderListPage> {
 
   Future<void> _print(OrderRecord row) async {
     if (row.id == 0) return;
-    final choice = await askPrintChoice(context, title: 'Print order');
+    final choice = await askPrintChoice(context, title: tr('Print order'));
     if (choice == null || !mounted) return;
     final loaded = Injection.orders.detailFor(row.id);
     if (loaded == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order could not be opened')),
+        SnackBar(content: Text(tr('Order could not be opened'))),
       );
       return;
     }
@@ -116,7 +117,7 @@ class _OrderListPageState extends State<OrderListPage> {
       companyAddress: profile.address,
       gstNumber: profile.gst,
       gstFraction: detail.gstApplied ? 0.03 : 0,
-      documentName: 'Order',
+      documentName: tr('Order'),
     );
     try {
       if (choice == 'pdf') {
@@ -125,7 +126,7 @@ class _OrderListPageState extends State<OrderListPage> {
         await printQuotationOnPos(copy);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Order sent to the POS printer')),
+          SnackBar(content: Text(tr('Order sent to the POS printer'))),
         );
       }
     } catch (error) {
@@ -139,18 +140,18 @@ class _OrderListPageState extends State<OrderListPage> {
     if (row.id == 0) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete order'),
-        content: Text('Delete order ${row.number.isEmpty ? row.id : row.number}?'),
+      builder: (context) => oqDirection(AlertDialog(
+        title: Text(tr('Delete order')),
+        content: Text('${tr('Delete order')} ${row.number.isEmpty ? row.id : row.number}?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB42318)),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(tr('Delete')),
           ),
         ],
-      ),
+      )),
     );
     if (confirmed != true || !mounted) return;
     final result = await Injection.orders.deleteOrder(clientCode: _clientCode, id: row.id);
@@ -158,7 +159,7 @@ class _OrderListPageState extends State<OrderListPage> {
     switch (result) {
       case Success():
         _showRows();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Order deleted')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tr('Order deleted'))));
       case Error(:final failure):
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failure.message)));
     }
@@ -169,7 +170,7 @@ class _OrderListPageState extends State<OrderListPage> {
     final detail = Injection.orders.detailFor(row.id);
     if (detail == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order could not be opened')),
+        SnackBar(content: Text(tr('Order could not be opened'))),
       );
       return;
     }
@@ -211,26 +212,28 @@ class _OrderListPageState extends State<OrderListPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _action(Icons.edit, Colors.blue, 'Edit', () => _edit(row)),
-        _action(Icons.delete, const Color(0xFFB42318), 'Delete', () => _delete(row)),
-        _action(Icons.print, const Color(0xFF1B7F3A), 'Print', () => _print(row)),
+        _action(Icons.edit, Colors.blue, tr('Edit'), () => _edit(row)),
+        _action(Icons.delete, const Color(0xFFB42318), tr('Delete'), () => _delete(row)),
+        _action(Icons.print, const Color(0xFF1B7F3A), tr('Print'), () => _print(row)),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return OrderQuotationScope(
+      child: Scaffold(
       backgroundColor: AppColors.homeSurface,
       appBar: AppBar(
         backgroundColor: AppColors.charcoal,
         foregroundColor: Colors.white,
-        title: const Text('Orders'),
+        title: Text(tr('Orders')),
         actions: [
+          const LanguageButton(light: true),
           IconButton(
             onPressed: () => _openForm(),
             icon: const Icon(Icons.add),
-            tooltip: 'New order',
+            tooltip: tr('New order'),
           ),
         ],
       ),
@@ -242,7 +245,7 @@ class _OrderListPageState extends State<OrderListPage> {
               controller: _search,
               onChanged: (_) => _showRows(),
               decoration: InputDecoration(
-                hintText: 'Search order or customer',
+                hintText: tr('Search order or customer'),
                 prefixIcon: const Icon(Icons.search),
                 filled: true,
                 fillColor: Colors.white,
@@ -257,10 +260,10 @@ class _OrderListPageState extends State<OrderListPage> {
               border: Border(bottom: BorderSide(color: AppColors.cardBorder)),
             ),
             child: _line(
-              const Text('Order No', style: TextStyle(fontWeight: FontWeight.w700)),
-              const Text('Customer', style: TextStyle(fontWeight: FontWeight.w700)),
-              const Text('Amount', style: TextStyle(fontWeight: FontWeight.w700)),
-              const Center(child: Text('Action', style: TextStyle(fontWeight: FontWeight.w700))),
+              Text(tr('Order No'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(tr('Customer'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(tr('Amount'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Center(child: Text(tr('Action'), style: const TextStyle(fontWeight: FontWeight.w700))),
             ),
           ),
           if (_error != null)
@@ -305,6 +308,7 @@ class _OrderListPageState extends State<OrderListPage> {
           ),
         ],
       ),
+    ),
     );
   }
 }

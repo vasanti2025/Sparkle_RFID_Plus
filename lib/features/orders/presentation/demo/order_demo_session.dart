@@ -1,4 +1,5 @@
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/locale/oq_text.dart';
 
 class OrderPiece {
   OrderPiece({
@@ -232,32 +233,32 @@ class OrderDemoSession {
 
   List<String> orderErrors(DemoOrder order) {
     final errors = <String>[];
-    if (order.customer.trim().isEmpty) errors.add(AppStrings.chooseACustomer);
-    if (order.items.isEmpty) errors.add(AppStrings.addAtLeastOne);
-    if (order.details.branch.trim().isEmpty) errors.add(AppStrings.chooseBranch);
+    if (order.customer.trim().isEmpty) errors.add(tr(AppStrings.chooseACustomer));
+    if (order.items.isEmpty) errors.add(tr(AppStrings.addAtLeastOne));
+    if (order.details.branch.trim().isEmpty) errors.add(tr(AppStrings.chooseBranch));
     final delivery = order.details.deliveryDate;
     final placed = order.details.orderDate;
     if (delivery.isNotEmpty && placed.isNotEmpty && delivery.compareTo(placed) < 0) {
-      errors.add(AppStrings.deliveryBeforeOrder);
+      errors.add(tr(AppStrings.deliveryBeforeOrder));
     }
     return errors;
   }
 
   List<String> detailErrors(OrderDetails details) {
     final errors = <String>[];
-    if (details.branch.trim().isEmpty) errors.add(AppStrings.chooseBranch);
+    if (details.branch.trim().isEmpty) errors.add(tr(AppStrings.chooseBranch));
     if (details.orderDate.isNotEmpty &&
         details.deliveryDate.isNotEmpty &&
         details.deliveryDate.compareTo(details.orderDate) < 0) {
-      errors.add(AppStrings.deliveryBeforeOrder);
+      errors.add(tr(AppStrings.deliveryBeforeOrder));
     }
     final fine = num.tryParse(details.fine);
     if (details.fine.isNotEmpty && (fine == null || fine < 0 || fine > 100)) {
-      errors.add(AppStrings.fineRange);
+      errors.add(tr(AppStrings.fineRange));
     }
     final wastage = num.tryParse(details.wastage);
     if (details.wastage.isNotEmpty && (wastage == null || wastage < 0)) {
-      errors.add(AppStrings.wastageNegative);
+      errors.add(tr(AppStrings.wastageNegative));
     }
     return errors;
   }
@@ -324,7 +325,7 @@ class OrderDemoSession {
   }
 
   static String formatDate(String iso) {
-    if (iso.isEmpty) return AppStrings.notSet;
+    if (iso.isEmpty) return tr(AppStrings.notSet);
     final parts = iso.split('-');
     if (parts.length != 3) return iso;
     const months = [

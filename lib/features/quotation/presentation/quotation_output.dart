@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../core/locale/oq_text.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -252,28 +254,28 @@ Future<String?> askPrintChoice(BuildContext context, {String title = 'Print quot
   return showModalBottomSheet<String>(
     context: context,
     builder: (context) {
-      return SafeArea(
+      return oqDirection(SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              title: Text(tr(title), style: const TextStyle(fontWeight: FontWeight.w700)),
             ),
             ListTile(
               leading: const Icon(Icons.picture_as_pdf_outlined),
-              title: const Text('PDF'),
-              subtitle: const Text('Normal printer'),
+              title: Text(tr('PDF')),
+              subtitle: Text(tr('Normal printer')),
               onTap: () => Navigator.pop(context, 'pdf'),
             ),
             ListTile(
               leading: const Icon(Icons.point_of_sale_outlined),
-              title: const Text('POS printer'),
-              subtitle: const Text('Print on this machine'),
+              title: Text(tr('POS printer')),
+              subtitle: Text(tr('Print on this machine')),
               onTap: () => Navigator.pop(context, 'pos'),
             ),
           ],
         ),
-      );
+      ));
     },
   );
 }

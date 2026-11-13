@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../domain/entities/stock_item.dart';
 import '../../domain/quotation_math.dart';
@@ -9,17 +10,19 @@ Future<void> showQuotationItemsPopup(
   required List<StockItem> items,
   required bool gstApplied,
   required double gstFraction,
+  List<List<(String, String)>>? orderLines,
 }) {
   if (items.isEmpty) return Future.value();
   return showDialog<void>(
     context: context,
     barrierDismissible: true,
     useRootNavigator: true,
-    builder: (_) => _QuotationItemsPopup(
+    builder: (_) => oqDirection(_QuotationItemsPopup(
       items: items,
       gstApplied: gstApplied,
       gstFraction: gstFraction,
-    ),
+      orderLines: orderLines,
+    )),
   );
 }
 
@@ -28,11 +31,13 @@ class _QuotationItemsPopup extends StatefulWidget {
     required this.items,
     required this.gstApplied,
     required this.gstFraction,
+    this.orderLines,
   });
 
   final List<StockItem> items;
   final bool gstApplied;
   final double gstFraction;
+  final List<List<(String, String)>>? orderLines;
 
   @override
   State<_QuotationItemsPopup> createState() => _QuotationItemsPopupState();
@@ -97,13 +102,13 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
     final canGoBack = _detailIndex != null && widget.items.length > 1;
     final item = widget.items[_activeIndex];
     final title = canGoBack
-        ? 'Item Details'
-        : (_showingDetail ? 'Scanned Item' : 'Scanned Items');
+        ? tr('Item Details')
+        : (_showingDetail ? tr('Scanned Item') : tr('Scanned Items'));
     final subtitle = _showingDetail
         ? (canGoBack
               ? '${_activeIndex + 1} / ${widget.items.length}  ·  ${_code(item)}'
               : _code(item))
-        : '${widget.items.length} item${widget.items.length == 1 ? '' : 's'} found';
+        : '${widget.items.length} ${widget.items.length == 1 ? tr('item found') : tr('items found')}';
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(8, 10, 8, 10),
@@ -111,7 +116,7 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
         children: [
           if (canGoBack)
             IconButton(
-              tooltip: 'Back',
+              tooltip: tr('Back'),
               onPressed: _back,
               icon: Icon(Icons.arrow_back_rounded, color: Colors.grey.shade800),
             )
@@ -136,7 +141,7 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
             ),
           ),
           IconButton(
-            tooltip: 'Close',
+            tooltip: tr('Close'),
             onPressed: () => Navigator.of(context).pop(),
             icon: Icon(Icons.close_rounded, color: Colors.grey.shade700),
           ),
@@ -159,7 +164,7 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
           minimumSize: const Size.fromHeight(44),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
-        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+        child: Text(tr('Done'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
       ),
     );
   }
@@ -179,6 +184,7 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
               item: widget.items[index],
               gstApplied: widget.gstApplied,
               gstFraction: widget.gstFraction,
+              lines: _linesFor(index),
               onTap: () => _open(index),
             ),
           );
@@ -201,8 +207,15 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
     );
   }
 
+  List<(String, String)>? _linesFor(int index) {
+    final lines = widget.orderLines;
+    if (lines == null || index < 0 || index >= lines.length) return null;
+    return lines[index];
+  }
+
   Widget _detailPage(StockItem item) {
     final view = _ItemView(item, gstApplied: widget.gstApplied, gstFraction: widget.gstFraction);
+    final rows = _linesFor(widget.items.indexOf(item)) ?? view.details;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       child: Column(
@@ -222,9 +235,9 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 6,
               ),
-              itemCount: view.details.length,
+              itemCount: rows.length,
               itemBuilder: (context, index) {
-                final row = view.details[index];
+                final row = rows[index];
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
@@ -235,7 +248,7 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(row.$1, style: TextStyle(fontSize: 10, color: Colors.grey.shade600, height: 1)),
+                      Text(tr(row.$1), style: TextStyle(fontSize: 10, color: Colors.grey.shade600, height: 1)),
                       Text(
                         row.$2,
                         maxLines: 1,
@@ -266,7 +279,7 @@ class _QuotationItemsPopupState extends State<_QuotationItemsPopup> {
       ),
       child: Row(
         children: [
-          const Text('TOTAL AMT', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.goldText)),
+          Text(tr('TOTAL AMT'), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.goldText)),
           const Spacer(),
           Text(amount, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.goldText)),
         ],
@@ -287,12 +300,14 @@ class _ItemCard extends StatelessWidget {
     required this.gstApplied,
     required this.gstFraction,
     required this.onTap,
+    this.lines,
   });
 
   final StockItem item;
   final bool gstApplied;
   final double gstFraction;
   final VoidCallback onTap;
+  final List<(String, String)>? lines;
 
   @override
   Widget build(BuildContext context) {
@@ -346,18 +361,18 @@ class _ItemCard extends StatelessWidget {
                             physics: const BouncingScrollPhysics(),
                             padding: EdgeInsets.zero,
                             children: [
-                              for (final row in view.cardRows) _pair(row.$1, row.$2),
+                              for (final row in lines ?? view.cardRows) _pair(tr(row.$1), row.$2),
                             ],
                           ),
                         ),
                         Row(
                           children: [
-                            const Text('Total', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.goldText)),
+                            Text(tr('Total'), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.goldText)),
                             const Spacer(),
                             Text(view.totalLabel, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.goldText)),
                           ],
                         ),
-                        const Text('Tap · swipe for next', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.goldText)),
+                        Text(tr('Tap · swipe for next'), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.goldText)),
                       ],
                     ),
                   ),
@@ -392,13 +407,13 @@ class _ItemImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (url == null) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.image_outlined, size: 48, color: AppColors.muted),
-            SizedBox(height: 6),
-            Text('No image', style: TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w500)),
+            const Icon(Icons.image_outlined, size: 48, color: AppColors.muted),
+            const SizedBox(height: 6),
+            Text(tr('No image'), style: const TextStyle(fontSize: 12, color: AppColors.muted, fontWeight: FontWeight.w500)),
           ],
         ),
       );

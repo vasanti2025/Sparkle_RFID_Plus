@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
@@ -136,7 +137,7 @@ class _OrdersPageState extends State<OrdersPage> {
       return;
     }
     if (!RfidService.instance.isSupported) {
-      _toast('RFID scanner is not available on this device');
+      _toast(tr('RFID scanner is not available on this device'));
       return;
     }
     setState(() => _capturing = true);
@@ -144,7 +145,7 @@ class _OrdersPageState extends State<OrdersPage> {
     if (!mounted) return;
     setState(_stopScan);
     if (read.error != null || read.codes.isEmpty) {
-      _toast(read.error ?? 'No tag found');
+      _toast(read.error ?? tr('No tag found'));
       return;
     }
     final matches = await Injection.quotations.stockForTags(
@@ -159,20 +160,20 @@ class _OrdersPageState extends State<OrdersPage> {
     }
     setState(() {});
     if (added == 0) {
-      _toast(matches.isEmpty ? 'Tags scanned but items were not found in stock.' : 'Already on this order');
+      _toast(matches.isEmpty ? tr('Tags scanned but items were not found in stock.') : tr('Already on this order'));
     } else {
-      _toast('$added item${added == 1 ? '' : 's'} added');
+      _toast('$added ${added == 1 ? tr('item') : tr('items')} ${tr('added')}');
     }
   }
 
   Future<void> _downloadCsv() async {
     final rows = <List<String>>[
       [
-        AppStrings.orderWord,
-        AppStrings.customerLabel,
-        AppStrings.orderDate,
-        AppStrings.deliveryDate,
-        AppStrings.itemCode,
+        tr(AppStrings.orderWord),
+        tr(AppStrings.customerLabel),
+        tr(AppStrings.orderDate),
+        tr(AppStrings.deliveryDate),
+        tr(AppStrings.itemCode),
         'Gross g',
         'Net g',
       ],
@@ -195,9 +196,9 @@ class _OrdersPageState extends State<OrdersPage> {
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/SPARKLE_Demo_Orders.csv');
       await file.writeAsString('\uFEFF$csv');
-      if (mounted) _toast(AppStrings.demoOrderCsv);
+      if (mounted) _toast(tr(AppStrings.demoOrderCsv));
     } catch (_) {
-      if (mounted) _toast(AppStrings.cacheError);
+      if (mounted) _toast(tr(AppStrings.cacheError));
     }
   }
 
@@ -209,7 +210,8 @@ class _OrdersPageState extends State<OrdersPage> {
   @override
   Widget build(BuildContext context) {
     final dirty = _page == _OrderPage.editor && (_draft?.dirty ?? false);
-    return PopScope(
+    return OrderQuotationScope(
+      child: PopScope(
       canPop: _page == _OrderPage.list && !dirty,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _back();
@@ -234,17 +236,18 @@ class _OrdersPageState extends State<OrdersPage> {
           ),
         ),
       ),
+      ),
     );
   }
 
   Widget _header() {
     final editing = _page == _OrderPage.editor;
     final title = editing
-        ? (_draft?.id == null ? AppStrings.newOrder : AppStrings.editOrder)
-        : AppStrings.orders;
+        ? (_draft?.id == null ? tr(AppStrings.newOrder) : tr(AppStrings.editOrder))
+        : tr(AppStrings.orders);
     final subtitle = editing
-        ? (_draft?.id ?? AppStrings.customerPath)
-        : AppStrings.customerOrders;
+        ? (_draft?.id ?? tr(AppStrings.customerPath))
+        : tr(AppStrings.customerOrders);
     return DecoratedBox(
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _headLine)),
@@ -255,7 +258,7 @@ class _OrdersPageState extends State<OrdersPage> {
           children: [
             IconButton(
               onPressed: _back,
-              tooltip: AppStrings.home,
+              tooltip: tr(AppStrings.home),
               icon: const Icon(Icons.arrow_back, size: 21, color: _ink),
             ),
             Expanded(
@@ -271,8 +274,9 @@ class _OrdersPageState extends State<OrdersPage> {
                 ],
               ),
             ),
+            const LanguageButton(),
             IconButton(
-              tooltip: AppStrings.moreActions,
+              tooltip: tr(AppStrings.moreActions),
               onPressed: editing ? _editorMenu : _tools,
               icon: const Icon(Icons.more_horiz, size: 21, color: _ink),
             ),
@@ -298,15 +302,15 @@ class _OrdersPageState extends State<OrdersPage> {
                       Row(
                         children: [
                           Text(
-                            AppStrings.yourCommitments,
+                            tr(AppStrings.yourCommitments),
                             style: _text(size: 10, weight: FontWeight.w600, color: const Color(0xFF80745B), letterSpacing: 0.5),
                           ),
                           const Spacer(),
-                          _tag(AppStrings.demoData),
+                          _tag(tr(AppStrings.demoData)),
                         ],
                       ),
                       const SizedBox(height: 12),
-                      _search(_orderQuery, AppStrings.searchOrders),
+                      _search(_orderQuery, tr(AppStrings.searchOrders)),
                       Row(
                         children: [
                           TextButton.icon(
@@ -317,7 +321,7 @@ class _OrdersPageState extends State<OrdersPage> {
                           ),
                           const Spacer(),
                           IconButton(
-                            tooltip: AppStrings.filterOrders,
+                            tooltip: tr(AppStrings.filterOrders),
                             onPressed: _filters,
                             style: IconButton.styleFrom(
                               backgroundColor: const Color(0xFFF0EADC),
@@ -330,16 +334,16 @@ class _OrdersPageState extends State<OrdersPage> {
                         ],
                       ),
                       if (_session.view == 'sku')
-                        _empty(AppStrings.skuSummary, AppStrings.skuSummaryBody)
+                        _empty(tr(AppStrings.skuSummary), tr(AppStrings.skuSummaryBody))
                       else if (rows.isEmpty)
-                        _empty(AppStrings.noOrdersFound, AppStrings.tryAnotherOrder)
+                        _empty(tr(AppStrings.noOrdersFound), tr(AppStrings.tryAnotherOrder))
                       else if (_session.view != 'customer')
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Align(
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              '${rows.length} ${AppStrings.ordersInDemo}',
+                              '${rows.length} ${tr(AppStrings.ordersInDemo)}',
                               style: _text(size: 11, color: const Color(0xFF8D7C5A)),
                             ),
                           ),
@@ -372,19 +376,19 @@ class _OrdersPageState extends State<OrdersPage> {
           ),
         ),
         _footer(
-          label: AppStrings.newOrder,
+          label: tr(AppStrings.newOrder),
           icon: Icons.add,
           onPressed: _openNew,
-          note: AppStrings.newOrderNote,
+          note: tr(AppStrings.newOrderNote),
         ),
       ],
     );
   }
 
   String get _viewLabel => switch (_session.view) {
-    'customer' => AppStrings.byCustomer,
-    'sku' => AppStrings.bySku,
-    _ => AppStrings.allOrders,
+    'customer' => tr(AppStrings.byCustomer),
+    'sku' => tr(AppStrings.bySku),
+    _ => tr(AppStrings.allOrders),
   };
 
   Widget _customerCard(String name, List<DemoOrder> rows) {
@@ -405,7 +409,7 @@ class _OrdersPageState extends State<OrdersPage> {
                   Text(name, style: _text(size: 14, weight: FontWeight.w600)),
                   const SizedBox(height: 6),
                   Text(
-                    '${group.length} orders · ${totals.count} ${totals.count == 1 ? AppStrings.piece : AppStrings.pieces}\nGross ${OrderDemoSession.grams(totals.gross)} g',
+                    '${group.length} orders · ${totals.count} ${totals.count == 1 ? tr(AppStrings.piece) : tr(AppStrings.pieces)}\nGross ${OrderDemoSession.grams(totals.gross)} g',
                     style: _text(size: 11, color: const Color(0xFF796E59), height: 1.6),
                   ),
                 ],
@@ -448,7 +452,7 @@ class _OrdersPageState extends State<OrdersPage> {
                 ),
               ),
               IconButton(
-                tooltip: AppStrings.orderActions,
+                tooltip: tr(AppStrings.orderActions),
                 onPressed: () => _actions(order.id!),
                 icon: const Icon(Icons.more_horiz, size: 18),
               ),
@@ -459,13 +463,13 @@ class _OrdersPageState extends State<OrdersPage> {
             children: [
               Expanded(
                 child: Text(
-                  '${totals.count} ${totals.count == 1 ? AppStrings.piece : AppStrings.pieces} · ${OrderDemoSession.grams(totals.gross)} g',
+                  '${totals.count} ${totals.count == 1 ? tr(AppStrings.piece) : tr(AppStrings.pieces)} · ${OrderDemoSession.grams(totals.gross)} g',
                   style: _text(size: 11, color: const Color(0xFF685F4E)),
                 ),
               ),
               const Icon(Icons.check, size: 14, color: Color(0xFF3B744E)),
               const SizedBox(width: 4),
-              Text(AppStrings.savedInDemo, style: _text(size: 11, color: const Color(0xFF685F4E))),
+              Text(tr(AppStrings.savedInDemo), style: _text(size: 11, color: const Color(0xFF685F4E))),
             ],
           ),
         ],
@@ -494,14 +498,14 @@ class _OrdersPageState extends State<OrdersPage> {
                   Expanded(
                     child: Text(
                       _capturing
-                          ? AppStrings.capturingPieces
+                          ? tr(AppStrings.capturingPieces)
                           : draft.dirty
-                          ? AppStrings.unsavedChanges
-                          : AppStrings.buildTheOrder,
+                          ? tr(AppStrings.unsavedChanges)
+                          : tr(AppStrings.buildTheOrder),
                       style: _text(size: 10, weight: FontWeight.w600, color: const Color(0xFF80745B), letterSpacing: 0.5),
                     ),
                   ),
-                  _tag(AppStrings.demoData),
+                  _tag(tr(AppStrings.demoData)),
                 ],
               ),
               const SizedBox(height: 12),
@@ -533,9 +537,9 @@ class _OrdersPageState extends State<OrdersPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(AppStrings.customerLabel, style: _text(size: 9, color: const Color(0xFF80704F))),
+                              Text(tr(AppStrings.customerLabel), style: _text(size: 9, color: const Color(0xFF80704F))),
                               Text(
-                                draft.customer.isEmpty ? AppStrings.chooseCustomer : draft.customer,
+                                draft.customer.isEmpty ? tr(AppStrings.chooseCustomer) : draft.customer,
                                 style: _text(size: 14, weight: FontWeight.w600),
                               ),
                             ],
@@ -559,17 +563,17 @@ class _OrdersPageState extends State<OrdersPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              draft.details.branch.isEmpty ? AppStrings.chooseBranch : draft.details.branch,
+                              draft.details.branch.isEmpty ? tr(AppStrings.chooseBranch) : draft.details.branch,
                               style: _text(size: 14, weight: FontWeight.w600),
                             ),
                             Text(
-                              '${AppStrings.deliveryWord} ${OrderDemoSession.formatDate(draft.details.deliveryDate)}',
+                              '${tr(AppStrings.deliveryWord)} ${OrderDemoSession.formatDate(draft.details.deliveryDate)}',
                               style: _text(size: 11, color: _muted),
                             ),
                           ],
                         ),
                       ),
-                      Text(AppStrings.orderDetails, style: _text(size: 12, color: _gold)),
+                      Text(tr(AppStrings.orderDetails), style: _text(size: 12, color: _gold)),
                       const Icon(Icons.tune, size: 16, color: _gold),
                     ],
                   ),
@@ -577,7 +581,7 @@ class _OrdersPageState extends State<OrdersPage> {
               ),
               Row(
                 children: [
-                  Expanded(child: _search(_itemQuery, AppStrings.rfidOrItem)),
+                  Expanded(child: _search(_itemQuery, tr(AppStrings.rfidOrItem))),
                   const SizedBox(width: 8),
                   Material(
                     color: const Color(0xFFEEE6D5),
@@ -600,28 +604,28 @@ class _OrdersPageState extends State<OrdersPage> {
               ],
               if (_capturing) ...[
                 const SizedBox(height: 10),
-                Text(AppStrings.readingOrderTags, style: _text(size: 12, weight: FontWeight.w600, color: const Color(0xFF8A682B))),
+                Text(tr(AppStrings.readingOrderTags), style: _text(size: 12, weight: FontWeight.w600, color: const Color(0xFF8A682B))),
               ],
               const SizedBox(height: 14),
               Row(
                 children: [
-                  Text(AppStrings.piecesInOrder, style: _text(size: 12, weight: FontWeight.w700, letterSpacing: 0.4)),
+                  Text(tr(AppStrings.piecesInOrder), style: _text(size: 12, weight: FontWeight.w700, letterSpacing: 0.4)),
                   const Spacer(),
                   Text(
-                    '${totals.count} ${totals.count == 1 ? AppStrings.piece : AppStrings.pieces}',
+                    '${totals.count} ${totals.count == 1 ? tr(AppStrings.piece) : tr(AppStrings.pieces)}',
                     style: _text(size: 12, color: _muted),
                   ),
                 ],
               ),
               const SizedBox(height: 8),
               if (draft.items.isEmpty)
-                _empty(AppStrings.addTheJewellery, AppStrings.orderScanOrSelect)
+                _empty(tr(AppStrings.addTheJewellery), tr(AppStrings.orderScanOrSelect))
               else
                 for (final piece in draft.items) _pieceCard(piece),
               TextButton.icon(
                 onPressed: _pick,
                 icon: const Icon(Icons.add, size: 16),
-                label: const Text(AppStrings.addAnotherPiece),
+                label: Text(tr(AppStrings.addAnotherPiece)),
               ),
               Container(
                 padding: const EdgeInsets.all(14),
@@ -632,14 +636,14 @@ class _OrdersPageState extends State<OrdersPage> {
                 ),
                 child: Column(
                   children: [
-                    _totalLine(AppStrings.netWeight, totals.net),
-                    _totalLine(AppStrings.fwWeight, totals.fw),
-                    _totalLine(AppStrings.orderAmount, null, pending: true),
+                    _totalLine(tr(AppStrings.netWeight), totals.net),
+                    _totalLine(tr(AppStrings.fwWeight), totals.fw),
+                    _totalLine(tr(AppStrings.orderAmount), null, pending: true),
                   ],
                 ),
               ),
               const SizedBox(height: 8),
-              Text(AppStrings.tapPiece, style: _text(size: 12, color: _muted)),
+              Text(tr(AppStrings.tapPiece), style: _text(size: 12, color: _muted)),
             ],
           ),
         ),
@@ -654,10 +658,10 @@ class _OrdersPageState extends State<OrdersPage> {
               Row(
                 children: [
                   Text('${totals.count}', style: _text(size: 14, weight: FontWeight.w700)),
-                  Text(' ${AppStrings.pieces}', style: _text(size: 13, color: _muted)),
+                  Text(' ${tr(AppStrings.pieces)}', style: _text(size: 13, color: _muted)),
                   const Spacer(),
                   Text(
-                    '${AppStrings.grossShort} ${OrderDemoSession.grams(totals.gross)} g',
+                    '${tr(AppStrings.grossShort)} ${OrderDemoSession.grams(totals.gross)} g',
                     style: _text(size: 13),
                   ),
                 ],
@@ -682,7 +686,7 @@ class _OrdersPageState extends State<OrdersPage> {
                         children: [
                           Icon(_capturing ? Icons.pause : Icons.document_scanner_outlined, size: 18),
                           Text(
-                            _capturing ? AppStrings.pause : AppStrings.scan,
+                            _capturing ? tr(AppStrings.pause) : tr(AppStrings.scan),
                             style: _text(size: 9, weight: FontWeight.w600, color: _gold),
                           ),
                         ],
@@ -694,7 +698,7 @@ class _OrdersPageState extends State<OrdersPage> {
                     child: FilledButton.icon(
                       onPressed: draft.items.isEmpty ? null : _review,
                       icon: const Icon(Icons.arrow_forward, size: 18),
-                      label: const Text(AppStrings.reviewOrder),
+                      label: Text(tr(AppStrings.reviewOrder)),
                       style: FilledButton.styleFrom(
                         backgroundColor: _ink,
                         foregroundColor: AppColors.white,
@@ -707,7 +711,7 @@ class _OrdersPageState extends State<OrdersPage> {
                 ],
               ),
               const SizedBox(height: 6),
-              Text(AppStrings.scanningAdds, textAlign: TextAlign.center, style: _text(size: 9, color: _note)),
+              Text(tr(AppStrings.scanningAdds), textAlign: TextAlign.center, style: _text(size: 9, color: _note)),
             ],
           ),
         ),
@@ -739,7 +743,7 @@ class _OrdersPageState extends State<OrdersPage> {
                       children: [
                         Text(piece.name, style: _text(size: 13, weight: FontWeight.w600)),
                         Text(
-                          '${piece.id} · ${AppStrings.grossShort} ${OrderDemoSession.grams(piece.grossMg)} g\n${AppStrings.netWeight} ${OrderDemoSession.grams(piece.netMg)}${piece.netMg == null ? '' : ' g'} · F+W ${OrderDemoSession.grams(piece.fwMg)}${piece.fwMg == null ? '' : ' g'}',
+                          '${piece.id} · ${tr(AppStrings.grossShort)} ${OrderDemoSession.grams(piece.grossMg)} g\n${tr(AppStrings.netWeight)} ${OrderDemoSession.grams(piece.netMg)}${piece.netMg == null ? '' : ' g'} · F+W ${OrderDemoSession.grams(piece.fwMg)}${piece.fwMg == null ? '' : ' g'}',
                           style: _text(size: 10, color: const Color(0xFF7A705F), height: 1.6),
                         ),
                       ],
@@ -750,7 +754,7 @@ class _OrdersPageState extends State<OrdersPage> {
             ),
           ),
           IconButton(
-            tooltip: AppStrings.removeThisPiece,
+            tooltip: tr(AppStrings.removeThisPiece),
             onPressed: () => _confirmRemove(piece.id),
             icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFA27361)),
           ),
@@ -767,7 +771,7 @@ class _OrdersPageState extends State<OrdersPage> {
       leading: _thumb(piece.name),
       title: Text('${piece.id} · ${piece.name}', style: _text(size: 13, weight: FontWeight.w600)),
       subtitle: Text(
-        '${AppStrings.grossShort} ${OrderDemoSession.grams(piece.grossMg)} g${added ? ' · ${AppStrings.alreadyAdded}' : ''}',
+        '${tr(AppStrings.grossShort)} ${OrderDemoSession.grams(piece.grossMg)} g${added ? ' · ${tr(AppStrings.alreadyAdded)}' : ''}',
         style: _text(size: 11, color: _muted),
       ),
       trailing: Icon(added ? Icons.check : Icons.add, color: _gold),
@@ -775,7 +779,7 @@ class _OrdersPageState extends State<OrdersPage> {
         final ok = _session.addItem(piece.id);
         _itemQuery.clear();
         setState(() {});
-        _toast(ok ? '${piece.id} added.' : AppStrings.alreadyInOrder);
+        _toast(ok ? '${piece.id} added.' : tr(AppStrings.alreadyInOrder));
       },
     );
   }
@@ -791,17 +795,17 @@ class _OrdersPageState extends State<OrdersPage> {
     }
     final totals = OrderDemoSession.totals(draft.items);
     var gst = draft.gst;
-    _openSheet(AppStrings.reviewOrder, StatefulBuilder(
+    _openSheet(tr(AppStrings.reviewOrder), StatefulBuilder(
       builder: (context, setSheet) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _row(AppStrings.customerLabel, draft.customer),
-            _row(AppStrings.branch, draft.details.branch),
-            _row(AppStrings.deliveryWord, OrderDemoSession.formatDate(draft.details.deliveryDate)),
-            _row(AppStrings.pieces, '${totals.count}'),
+            _row(tr(AppStrings.customerLabel), draft.customer),
+            _row(tr(AppStrings.branch), draft.details.branch),
+            _row(tr(AppStrings.deliveryWord), OrderDemoSession.formatDate(draft.details.deliveryDate)),
+            _row(tr(AppStrings.pieces), '${totals.count}'),
             _row(
-              AppStrings.grossSlashNet,
+              tr(AppStrings.grossSlashNet),
               '${OrderDemoSession.grams(totals.gross)} / ${OrderDemoSession.grams(totals.net)} g',
             ),
             Container(
@@ -821,20 +825,20 @@ class _OrdersPageState extends State<OrdersPage> {
               contentPadding: EdgeInsets.zero,
               value: gst,
               onChanged: (value) => setSheet(() => gst = value ?? false),
-              title: Text(AppStrings.gstLabel, style: _text(size: 12)),
+              title: Text(tr(AppStrings.gstLabel), style: _text(size: 12)),
               controlAffinity: ListTileControlAffinity.leading,
             ),
-            _row(AppStrings.orderAmount, AppStrings.pricingPending),
+            _row(tr(AppStrings.orderAmount), tr(AppStrings.pricingPending)),
             const SizedBox(height: 8),
-            Text(AppStrings.checkCustomer, style: _text(size: 11, color: const Color(0xFF75603B), height: 1.6)),
+            Text(tr(AppStrings.checkCustomer), style: _text(size: 11, color: const Color(0xFF75603B), height: 1.6)),
             const SizedBox(height: 12),
-            _filled(AppStrings.saveDemoOrder, () {
+            _filled(tr(AppStrings.saveDemoOrder), () {
               draft.gst = gst;
               Navigator.pop(context);
               _commit(draft);
             }),
             const SizedBox(height: 8),
-            Text(AppStrings.demoSaveOnly, style: _text(size: 12, color: _note)),
+            Text(tr(AppStrings.demoSaveOnly), style: _text(size: 12, color: _note)),
           ],
         );
       },
@@ -842,7 +846,7 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   void _savedSheet(String id) {
-    _openSheet(AppStrings.orderSavedDemo, Column(
+    _openSheet(tr(AppStrings.orderSavedDemo), Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
@@ -853,11 +857,11 @@ class _OrdersPageState extends State<OrdersPage> {
           child: const Icon(Icons.check, color: Color(0xFF3B744E)),
         ),
         const SizedBox(height: 12),
-        Text('$id ${AppStrings.readyInList}', style: _text(size: 13, height: 1.5)),
+        Text('$id ${tr(AppStrings.readyInList)}', style: _text(size: 13, height: 1.5)),
         const SizedBox(height: 8),
-        Text(AppStrings.noLiveErp, style: _text(size: 12, color: _muted, height: 1.5)),
+        Text(tr(AppStrings.noLiveErp), style: _text(size: 12, color: _muted, height: 1.5)),
         const SizedBox(height: 12),
-        _filled(AppStrings.backToOrders, () => Navigator.pop(context)),
+        _filled(tr(AppStrings.backToOrders), () => Navigator.pop(context)),
       ],
     ));
   }
@@ -865,7 +869,7 @@ class _OrdersPageState extends State<OrdersPage> {
   void _customers() {
     final query = TextEditingController();
     _openSheet(
-      AppStrings.chooseCustomer,
+      tr(AppStrings.chooseCustomer),
       StatefulBuilder(
         builder: (context, setSheet) {
           final names = _session.customers
@@ -874,9 +878,9 @@ class _OrdersPageState extends State<OrdersPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _search(query, AppStrings.customerName, onChanged: (_) => setSheet(() {})),
+              _search(query, tr(AppStrings.customerName), onChanged: (_) => setSheet(() {})),
               if (names.isEmpty)
-                Text(AppStrings.noCustomerMatch, style: _text(size: 13, color: _muted))
+                Text(tr(AppStrings.noCustomerMatch), style: _text(size: 13, color: _muted))
               else
                 for (final name in names)
                   ListTile(
@@ -902,7 +906,7 @@ class _OrdersPageState extends State<OrdersPage> {
                   _addCustomer();
                 },
                 icon: const Icon(Icons.add),
-                label: const Text(AppStrings.addCustomer),
+                label: Text(tr(AppStrings.addCustomer)),
               ),
             ],
           );
@@ -917,7 +921,7 @@ class _OrdersPageState extends State<OrdersPage> {
     String? error;
     var saving = false;
     _openSheet(
-      AppStrings.addCustomer,
+      tr(AppStrings.addCustomer),
       StatefulBuilder(
         builder: (context, setSheet) {
           return Column(
@@ -925,7 +929,7 @@ class _OrdersPageState extends State<OrdersPage> {
             children: [
               TextField(
                 controller: name,
-                decoration: _input(AppStrings.customerName),
+                decoration: _input(tr(AppStrings.customerName)),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -935,10 +939,10 @@ class _OrdersPageState extends State<OrdersPage> {
               ),
               if (error != null) Text(error!, style: _text(size: 12, color: AppColors.error)),
               const SizedBox(height: 12),
-              _filled(saving ? 'Saving' : AppStrings.useCustomer, () async {
+              _filled(saving ? 'Saving' : tr(AppStrings.useCustomer), () async {
                 final value = name.text.trim();
                 if (value.isEmpty) {
-                  setSheet(() => error = AppStrings.enterCustomerName);
+                  setSheet(() => error = tr(AppStrings.enterCustomerName));
                   return;
                 }
                 if (mobile.text.trim().isEmpty) {
@@ -951,6 +955,7 @@ class _OrdersPageState extends State<OrdersPage> {
                   name: value,
                   mobile: mobile.text.trim(),
                   email: '',
+                  branchId: AppSession.branchId,
                 );
                 if (!context.mounted) return;
                 if (result case Error(:final failure)) {
@@ -975,7 +980,7 @@ class _OrdersPageState extends State<OrdersPage> {
                 setState(() {});
               }),
               const SizedBox(height: 8),
-              Text(AppStrings.addsNameDemo, style: _text(size: 12, color: _note)),
+              Text(tr(AppStrings.addsNameDemo), style: _text(size: 12, color: _note)),
             ],
           );
         },
@@ -1004,7 +1009,7 @@ class _OrdersPageState extends State<OrdersPage> {
   void _pick() {
     final query = TextEditingController();
     _openSheet(
-      AppStrings.addAPiece,
+      tr(AppStrings.addAPiece),
       StatefulBuilder(
         builder: (context, setSheet) {
           final items = _session.catalog.where((piece) {
@@ -1014,9 +1019,9 @@ class _OrdersPageState extends State<OrdersPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _search(query, AppStrings.rfidOrItem, onChanged: (_) => setSheet(() {})),
+              _search(query, tr(AppStrings.rfidOrItem), onChanged: (_) => setSheet(() {})),
               if (items.isEmpty)
-                Text(AppStrings.noMatchingItem, style: _text(size: 13, color: _muted))
+                Text(tr(AppStrings.noMatchingItem), style: _text(size: 13, color: _muted))
               else
                 for (final piece in items) _sheetPick(piece),
             ],
@@ -1033,7 +1038,7 @@ class _OrdersPageState extends State<OrdersPage> {
       enabled: !added,
       title: Text('${piece.id} · ${piece.name}', style: _text(size: 14, weight: FontWeight.w600)),
       subtitle: Text(
-        '${AppStrings.grossShort} ${OrderDemoSession.grams(piece.grossMg)} g${added ? ' · ${AppStrings.alreadyAdded}' : ''}',
+        '${tr(AppStrings.grossShort)} ${OrderDemoSession.grams(piece.grossMg)} g${added ? ' · ${tr(AppStrings.alreadyAdded)}' : ''}',
         style: _text(size: 12, color: _muted),
       ),
       trailing: Icon(added ? Icons.check : Icons.add, color: _gold),
@@ -1043,24 +1048,24 @@ class _OrdersPageState extends State<OrdersPage> {
               final ok = _session.addItem(piece.id);
               Navigator.pop(context);
               setState(() {});
-              _toast(ok ? '${piece.id} added.' : AppStrings.alreadyInOrder);
+              _toast(ok ? '${piece.id} added.' : tr(AppStrings.alreadyInOrder));
             },
     );
   }
 
   void _confirmRemove(String id) {
     _removeId = id;
-    _openSheet(AppStrings.removeThisPiece, Column(
+    _openSheet(tr(AppStrings.removeThisPiece), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Remove $id from this order? ${AppStrings.stockUnchanged}',
+          'Remove $id from this order? ${tr(AppStrings.stockUnchanged)}',
           style: _text(size: 13, color: _muted, height: 1.5),
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text(AppStrings.keep))),
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(tr(AppStrings.keep)))),
             const SizedBox(width: 8),
             Expanded(
               child: FilledButton(
@@ -1070,7 +1075,7 @@ class _OrdersPageState extends State<OrdersPage> {
                   setState(() {});
                 },
                 style: FilledButton.styleFrom(backgroundColor: _ink),
-                child: const Text(AppStrings.removePiece),
+                child: Text(tr(AppStrings.removePiece)),
               ),
             ),
           ],
@@ -1098,50 +1103,50 @@ class _OrdersPageState extends State<OrdersPage> {
     };
     String? error;
     _openSheet(
-      AppStrings.orderDetails,
+      tr(AppStrings.orderDetails),
       StatefulBuilder(
         builder: (context, setSheet) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               InputDecorator(
-                decoration: _input(AppStrings.branch),
+                decoration: _input(tr(AppStrings.branch)),
                 child: Text(details.branch, style: _text(size: 14)),
               ),
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: TextField(controller: fields['orderDate'], decoration: _input(AppStrings.orderDate))),
+                  Expanded(child: TextField(controller: fields['orderDate'], decoration: _input(tr(AppStrings.orderDate)))),
                   const SizedBox(width: 8),
-                  Expanded(child: TextField(controller: fields['deliveryDate'], decoration: _input(AppStrings.deliveryDate))),
+                  Expanded(child: TextField(controller: fields['deliveryDate'], decoration: _input(tr(AppStrings.deliveryDate)))),
                 ],
               ),
-              _group(AppStrings.eventNotes, [
-                TextField(controller: fields['exhibition'], decoration: _input(AppStrings.exhibitionField)),
+              _group(tr(AppStrings.eventNotes), [
+                TextField(controller: fields['exhibition'], decoration: _input(tr(AppStrings.exhibitionField))),
                 const SizedBox(height: 8),
-                TextField(controller: fields['remark'], decoration: _input(AppStrings.remark)),
+                TextField(controller: fields['remark'], decoration: _input(tr(AppStrings.remark))),
               ]),
-              _group(AppStrings.jewellerySpecs, [
-                TextField(controller: fields['purity'], decoration: _input(AppStrings.purity)),
+              _group(tr(AppStrings.jewellerySpecs), [
+                TextField(controller: fields['purity'], decoration: _input(tr(AppStrings.purity))),
                 const SizedBox(height: 8),
-                TextField(controller: fields['size'], decoration: _input(AppStrings.size)),
+                TextField(controller: fields['size'], decoration: _input(tr(AppStrings.size))),
                 const SizedBox(height: 8),
-                TextField(controller: fields['length'], decoration: _input(AppStrings.lengthField)),
+                TextField(controller: fields['length'], decoration: _input(tr(AppStrings.lengthField))),
                 const SizedBox(height: 8),
-                TextField(controller: fields['colour'], decoration: _input(AppStrings.colourType)),
+                TextField(controller: fields['colour'], decoration: _input(tr(AppStrings.colourType))),
                 const SizedBox(height: 8),
-                TextField(controller: fields['screw'], decoration: _input(AppStrings.screwType)),
+                TextField(controller: fields['screw'], decoration: _input(tr(AppStrings.screwType))),
                 const SizedBox(height: 8),
-                TextField(controller: fields['polish'], decoration: _input(AppStrings.polishType)),
+                TextField(controller: fields['polish'], decoration: _input(tr(AppStrings.polishType))),
               ]),
-              _group(AppStrings.fineWastage, [
-                TextField(controller: fields['fine'], decoration: _input(AppStrings.finePercent), keyboardType: TextInputType.number),
+              _group(tr(AppStrings.fineWastage), [
+                TextField(controller: fields['fine'], decoration: _input(tr(AppStrings.finePercent)), keyboardType: TextInputType.number),
                 const SizedBox(height: 8),
-                TextField(controller: fields['wastage'], decoration: _input(AppStrings.wastagePercent), keyboardType: TextInputType.number),
+                TextField(controller: fields['wastage'], decoration: _input(tr(AppStrings.wastagePercent)), keyboardType: TextInputType.number),
               ]),
               if (error != null) Text(error!, style: _text(size: 12, color: AppColors.error)),
               const SizedBox(height: 12),
-              _filled(AppStrings.applyDetails, () {
+              _filled(tr(AppStrings.applyDetails), () {
                 final next = details.copy()
                   ..orderDate = fields['orderDate']!.text.trim()
                   ..deliveryDate = fields['deliveryDate']!.text.trim()
@@ -1169,7 +1174,7 @@ class _OrdersPageState extends State<OrdersPage> {
                 });
               }),
               const SizedBox(height: 8),
-              Text(AppStrings.appliesToOrder, style: _text(size: 12, color: _note)),
+              Text(tr(AppStrings.appliesToOrder), style: _text(size: 12, color: _note)),
             ],
           );
         },
@@ -1252,28 +1257,28 @@ class _OrdersPageState extends State<OrdersPage> {
     }
 
     _openSheet(
-      AppStrings.pieceDetails,
+      tr(AppStrings.pieceDetails),
       StatefulBuilder(
         builder: (context, setSheet) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _row(AppStrings.product, piece.name),
-              _row(AppStrings.itemCode, piece.id),
-              TextField(controller: branch, decoration: _input(AppStrings.branch)),
+              _row(tr(AppStrings.product), piece.name),
+              _row(tr(AppStrings.itemCode), piece.id),
+              TextField(controller: branch, decoration: _input(tr(AppStrings.branch))),
               const SizedBox(height: 8),
-              Text(AppStrings.weightsAndPacking, style: _text(size: 13, weight: FontWeight.w600)),
+              Text(tr(AppStrings.weightsAndPacking), style: _text(size: 13, weight: FontWeight.w600)),
               const SizedBox(height: 8),
               TextField(
                 controller: weights['total'],
-                decoration: _input(AppStrings.totalWeightG),
+                decoration: _input(tr(AppStrings.totalWeightG)),
                 keyboardType: TextInputType.number,
                 onChanged: (_) => queueRecalc(keepGross: grossFocus.hasFocus),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: weights['packing'],
-                decoration: _input(AppStrings.packingWeightG),
+                decoration: _input(tr(AppStrings.packingWeightG)),
                 keyboardType: TextInputType.number,
                 onChanged: (_) => queueRecalc(keepGross: grossFocus.hasFocus),
               ),
@@ -1281,20 +1286,20 @@ class _OrdersPageState extends State<OrdersPage> {
               TextField(
                 controller: weights['gross'],
                 focusNode: grossFocus,
-                decoration: _input(AppStrings.grossWeightG),
+                decoration: _input(tr(AppStrings.grossWeightG)),
                 keyboardType: TextInputType.number,
                 onChanged: (_) => queueRecalc(keepGross: true),
               ),
               const SizedBox(height: 8),
-              _row('Stone wt', '${stone.toStringAsFixed(3)} g'),
-              _row('Diamond wt', '${diamond.toStringAsFixed(3)} g'),
+              _row(tr('Stone wt'), '${stone.toStringAsFixed(3)} g'),
+              _row(tr('Diamond wt'), '${diamond.toStringAsFixed(3)} g'),
               const SizedBox(height: 8),
-              TextField(controller: weights['net'], decoration: _input(AppStrings.netWeightG), keyboardType: TextInputType.number),
+              TextField(controller: weights['net'], decoration: _input(tr(AppStrings.netWeightG)), keyboardType: TextInputType.number),
               const SizedBox(height: 8),
-              TextField(controller: weights['fw'], decoration: _input('F+W weight (g)'), keyboardType: TextInputType.number),
+              TextField(controller: weights['fw'], decoration: _input(tr('F+W weight (g)')), keyboardType: TextInputType.number),
               if (error != null) Text(error!, style: _text(size: 12, color: AppColors.error)),
               const SizedBox(height: 12),
-              _filled(AppStrings.applyToPiece, () {
+              _filled(tr(AppStrings.applyToPiece), () {
                 recalc(keepGross: grossFocus.hasFocus);
                 int? read(String key) {
                   final raw = weights[key]!.text.trim();
@@ -1306,7 +1311,7 @@ class _OrdersPageState extends State<OrdersPage> {
 
                 final parsed = {for (final key in weights.keys) key: read(key)};
                 if (parsed.values.any((value) => value == -1)) {
-                  setSheet(() => error = AppStrings.weightsNonNegative);
+                  setSheet(() => error = tr(AppStrings.weightsNonNegative));
                   return;
                 }
                 piece
@@ -1338,7 +1343,7 @@ class _OrdersPageState extends State<OrdersPage> {
                 });
               }),
               const SizedBox(height: 8),
-              Text(AppStrings.missingWeights, style: _text(size: 12, color: _note)),
+              Text(tr(AppStrings.missingWeights), style: _text(size: 12, color: _note)),
             ],
           );
         },
@@ -1356,11 +1361,11 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   void _views() {
-    _openSheet(AppStrings.viewOrders, Column(
+    _openSheet(tr(AppStrings.viewOrders), Column(
       children: [
-        _menu(AppStrings.allOrders, () => _setView('orders')),
-        _menu(AppStrings.skuSummary, () => _setView('sku')),
-        _menu(AppStrings.customerSummary, () => _setView('customer')),
+        _menu(tr(AppStrings.allOrders), () => _setView('orders')),
+        _menu(tr(AppStrings.skuSummary), () => _setView('sku')),
+        _menu(tr(AppStrings.customerSummary), () => _setView('customer')),
       ],
     ));
   }
@@ -1377,7 +1382,7 @@ class _OrdersPageState extends State<OrdersPage> {
     final to = TextEditingController(text: _session.to);
     String? error;
     _openSheet(
-      AppStrings.filterOrders,
+      tr(AppStrings.filterOrders),
       StatefulBuilder(
         builder: (context, setSheet) {
           return Column(
@@ -1385,20 +1390,20 @@ class _OrdersPageState extends State<OrdersPage> {
             children: [
               DropdownButtonFormField<String>(
                 initialValue: field,
-                decoration: _input(AppStrings.dateField),
-                items: const [
-                  DropdownMenuItem(value: 'orderDate', child: Text(AppStrings.orderDate)),
-                  DropdownMenuItem(value: 'deliveryDate', child: Text(AppStrings.deliveryDate)),
+                decoration: _input(tr(AppStrings.dateField)),
+                items: [
+                  DropdownMenuItem(value: 'orderDate', child: Text(tr(AppStrings.orderDate))),
+                  DropdownMenuItem(value: 'deliveryDate', child: Text(tr(AppStrings.deliveryDate))),
                 ],
                 onChanged: (value) => setSheet(() => field = value ?? field),
               ),
               const SizedBox(height: 8),
-              TextField(controller: from, decoration: _input(AppStrings.fromDate)),
+              TextField(controller: from, decoration: _input(tr(AppStrings.fromDate))),
               const SizedBox(height: 8),
-              TextField(controller: to, decoration: _input(AppStrings.toDate)),
+              TextField(controller: to, decoration: _input(tr(AppStrings.toDate))),
               const SizedBox(height: 8),
-              Text(AppStrings.allStatuses, style: _text(size: 14, weight: FontWeight.w600)),
-              Text(AppStrings.noStatusValues, style: _text(size: 12, color: _note)),
+              Text(tr(AppStrings.allStatuses), style: _text(size: 14, weight: FontWeight.w600)),
+              Text(tr(AppStrings.noStatusValues), style: _text(size: 12, color: _note)),
               if (error != null) Text(error!, style: _text(size: 12, color: AppColors.error)),
               const SizedBox(height: 12),
               Row(
@@ -1413,7 +1418,7 @@ class _OrdersPageState extends State<OrdersPage> {
                         Navigator.pop(context);
                         setState(() {});
                       },
-                      child: const Text(AppStrings.reset),
+                      child: Text(tr(AppStrings.reset)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1423,7 +1428,7 @@ class _OrdersPageState extends State<OrdersPage> {
                         final start = from.text.trim();
                         final end = to.text.trim();
                         if (start.isNotEmpty && end.isNotEmpty && start.compareTo(end) > 0) {
-                          setSheet(() => error = AppStrings.endDateAfter);
+                          setSheet(() => error = tr(AppStrings.endDateAfter));
                           return;
                         }
                         _session
@@ -1434,7 +1439,7 @@ class _OrdersPageState extends State<OrdersPage> {
                         setState(() {});
                       },
                       style: FilledButton.styleFrom(backgroundColor: _ink),
-                      child: const Text(AppStrings.applyFilters),
+                      child: Text(tr(AppStrings.applyFilters)),
                     ),
                   ),
                 ],
@@ -1450,17 +1455,17 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   void _actions(String id) {
-    _openSheet(AppStrings.orderActions, Column(
+    _openSheet(tr(AppStrings.orderActions), Column(
       children: [
-        _menu(AppStrings.editOrder, () {
+        _menu(tr(AppStrings.editOrder), () {
           Navigator.pop(context);
           _openEdit(id);
         }),
-        _menu(AppStrings.printPreview, () {
+        _menu(tr(AppStrings.printPreview), () {
           Navigator.pop(context);
           _print(id);
         }),
-        _menu(AppStrings.deleteOrder, () {
+        _menu(tr(AppStrings.deleteOrder), () {
           Navigator.pop(context);
           _delete(id);
         }),
@@ -1474,11 +1479,11 @@ class _OrdersPageState extends State<OrdersPage> {
       orElse: () => null,
     );
     if (order == null) return;
-    _openSheet(AppStrings.orderPrintPreview, Column(
+    _openSheet(tr(AppStrings.orderPrintPreview), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _row(AppStrings.orderWord, order.id ?? ''),
-        _row(AppStrings.customerLabel, order.customer),
+        _row(tr(AppStrings.orderWord), order.id ?? ''),
+        _row(tr(AppStrings.customerLabel), order.customer),
         const SizedBox(height: 8),
         Text(
           order.items
@@ -1487,25 +1492,25 @@ class _OrdersPageState extends State<OrdersPage> {
           style: _text(size: 12, height: 1.6),
         ),
         const SizedBox(height: 8),
-        Text(AppStrings.previewOnlyPrint, style: _text(size: 12, color: _note, height: 1.5)),
+        Text(tr(AppStrings.previewOnlyPrint), style: _text(size: 12, color: _note, height: 1.5)),
         const SizedBox(height: 12),
-        _filled(AppStrings.done, () => Navigator.pop(context)),
+        _filled(tr(AppStrings.done), () => Navigator.pop(context)),
       ],
     ));
   }
 
   void _delete(String id) {
-    _openSheet(AppStrings.deleteDemoOrder, Column(
+    _openSheet(tr(AppStrings.deleteDemoOrder), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'Remove $id ${AppStrings.removeFromDemoList}',
+          'Remove $id ${tr(AppStrings.removeFromDemoList)}',
           style: _text(size: 13, color: _muted, height: 1.5),
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text(AppStrings.keep))),
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(tr(AppStrings.keep)))),
             const SizedBox(width: 8),
             Expanded(
               child: FilledButton(
@@ -1517,7 +1522,7 @@ class _OrdersPageState extends State<OrdersPage> {
                   if (message != null) _toast(message);
                 },
                 style: FilledButton.styleFrom(backgroundColor: _ink),
-                child: const Text(AppStrings.deleteDemoOrderAction),
+                child: Text(tr(AppStrings.deleteDemoOrderAction)),
               ),
             ),
           ],
@@ -1527,21 +1532,21 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   void _tools() {
-    _openSheet(AppStrings.orderTools, Column(
+    _openSheet(tr(AppStrings.orderTools), Column(
       children: [
-        _menu(AppStrings.syncOrders, () {
+        _menu(tr(AppStrings.syncOrders), () {
           Navigator.pop(context);
           _sync();
         }),
-        _menu(AppStrings.reportView, () {
+        _menu(tr(AppStrings.reportView), () {
           Navigator.pop(context);
           _views();
         }),
-        _menu(AppStrings.filterOrders, () {
+        _menu(tr(AppStrings.filterOrders), () {
           Navigator.pop(context);
           _filters();
         }),
-        _menu(AppStrings.downloadDemoCsv, () {
+        _menu(tr(AppStrings.downloadDemoCsv), () {
           Navigator.pop(context);
           _downloadCsv();
         }),
@@ -1559,35 +1564,35 @@ class _OrdersPageState extends State<OrdersPage> {
     }
     if (!mounted) return;
     setState(() {});
-    _openSheet(AppStrings.syncOrders, Column(
+    _openSheet(tr(AppStrings.syncOrders), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Icon(Icons.cloud_upload_outlined, size: 32, color: _gold),
         const SizedBox(height: 8),
         Text(
-          '${_session.orders.length} ${AppStrings.sampleOrdersNote}',
+          '${_session.orders.length} ${tr(AppStrings.sampleOrdersNote)}',
           style: _text(size: 13, height: 1.5),
         ),
         const SizedBox(height: 8),
-        Text(AppStrings.notConnectedErp, style: _text(size: 12, color: _note, height: 1.5)),
+        Text(tr(AppStrings.notConnectedErp), style: _text(size: 12, color: _note, height: 1.5)),
         const SizedBox(height: 12),
-        _filled(AppStrings.understood, () => Navigator.pop(context)),
+        _filled(tr(AppStrings.understood), () => Navigator.pop(context)),
       ],
     ));
   }
 
   void _editorMenu() {
-    _openSheet(AppStrings.orderOptions, Column(
+    _openSheet(tr(AppStrings.orderOptions), Column(
       children: [
-        _menu(AppStrings.gscan, () {
+        _menu(tr(AppStrings.gscan), () {
           Navigator.pop(context);
           _gscan();
         }),
-        _menu(AppStrings.orderDetails, () {
+        _menu(tr(AppStrings.orderDetails), () {
           Navigator.pop(context);
           _details();
         }),
-        _menu(AppStrings.clearPieces, () {
+        _menu(tr(AppStrings.clearPieces), () {
           Navigator.pop(context);
           _clearPieces();
         }),
@@ -1596,27 +1601,27 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   void _gscan() {
-    _openSheet(AppStrings.gscan, Column(
+    _openSheet(tr(AppStrings.gscan), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(AppStrings.gscanStays, style: _text(size: 13, height: 1.5)),
+        Text(tr(AppStrings.gscanStays), style: _text(size: 13, height: 1.5)),
         const SizedBox(height: 8),
-        Text(AppStrings.gscanNotShown, style: _text(size: 12, color: _note, height: 1.5)),
+        Text(tr(AppStrings.gscanNotShown), style: _text(size: 12, color: _note, height: 1.5)),
         const SizedBox(height: 12),
-        _filled(AppStrings.backToOrders, () => Navigator.pop(context)),
+        _filled(tr(AppStrings.backToOrders), () => Navigator.pop(context)),
       ],
     ));
   }
 
   void _clearPieces() {
-    _openSheet(AppStrings.clearThisSelection, Column(
+    _openSheet(tr(AppStrings.clearThisSelection), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(AppStrings.clearPiecesBody, style: _text(size: 13, color: _muted, height: 1.5)),
+        Text(tr(AppStrings.clearPiecesBody), style: _text(size: 13, color: _muted, height: 1.5)),
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text(AppStrings.keep))),
+            Expanded(child: OutlinedButton(onPressed: () => Navigator.pop(context), child: Text(tr(AppStrings.keep)))),
             const SizedBox(width: 8),
             Expanded(
               child: FilledButton(
@@ -1627,7 +1632,7 @@ class _OrdersPageState extends State<OrdersPage> {
                   setState(() {});
                 },
                 style: FilledButton.styleFrom(backgroundColor: _ink),
-                child: const Text(AppStrings.clearPieces),
+                child: Text(tr(AppStrings.clearPieces)),
               ),
             ),
           ],
@@ -1637,19 +1642,19 @@ class _OrdersPageState extends State<OrdersPage> {
   }
 
   void _leaveSheet() {
-    _openSheet(AppStrings.leaveOrder, Column(
+    _openSheet(tr(AppStrings.leaveOrder), Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(AppStrings.leaveOrderBody, style: _text(size: 13, color: _muted, height: 1.5)),
+        Text(tr(AppStrings.leaveOrderBody), style: _text(size: 13, color: _muted, height: 1.5)),
         const SizedBox(height: 12),
-        _filled(AppStrings.keepEditing, () => Navigator.pop(context)),
+        _filled(tr(AppStrings.keepEditing), () => Navigator.pop(context)),
         TextButton(
           onPressed: () {
             _session.draft = null;
             Navigator.pop(context);
             _goList();
           },
-          child: const Text(AppStrings.discardChanges),
+          child: Text(tr(AppStrings.discardChanges)),
         ),
       ],
     ));
@@ -1665,7 +1670,7 @@ class _OrdersPageState extends State<OrdersPage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(23)),
       ),
       builder: (context) {
-        return Padding(
+        return oqDirection(Padding(
           padding: EdgeInsets.fromLTRB(22, 0, 22, 20 + MediaQuery.viewInsetsOf(context).bottom),
           child: SingleChildScrollView(
             child: Column(
@@ -1697,7 +1702,7 @@ class _OrdersPageState extends State<OrdersPage> {
               ],
             ),
           ),
-        );
+        ));
       },
     );
   }
@@ -1735,7 +1740,7 @@ class _OrdersPageState extends State<OrdersPage> {
         children: [
           Expanded(child: Text(label, style: _text(size: 11))),
           Text(
-            pending ? AppStrings.pricingPending : '${OrderDemoSession.grams(milligrams)}${milligrams == null ? '' : ' g'}',
+            pending ? tr(AppStrings.pricingPending) : '${OrderDemoSession.grams(milligrams)}${milligrams == null ? '' : ' g'}',
             style: _text(size: 11, weight: FontWeight.w600),
           ),
         ],
@@ -1888,7 +1893,7 @@ TextStyle _text({
 }) {
   return TextStyle(
     fontFamily: 'Inter',
-    fontFamilyFallback: const <String>[],
+    fontFamilyFallback: const ['Noto Sans Devanagari', 'Noto Sans Arabic', 'Noto Naskh Arabic', 'Roboto'],
     fontSize: size,
     fontWeight: weight,
     color: color,

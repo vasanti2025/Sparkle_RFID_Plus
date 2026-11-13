@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/di/injection.dart';
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/utils/result.dart';
@@ -48,7 +49,7 @@ class _QuotationListPageState extends State<QuotationListPage> {
     if (_clientCode.isEmpty) {
       setState(() {
         _waitingForFirst = false;
-        _error = 'Sign in to load quotations.';
+        _error = tr('Sign in to load quotations.');
       });
       return;
     }
@@ -58,7 +59,7 @@ class _QuotationListPageState extends State<QuotationListPage> {
           if (!mounted || _rows.isNotEmpty) return;
           setState(() {
             _waitingForFirst = false;
-            _error = 'Quotations could not be loaded.';
+            _error = tr('Quotations could not be loaded.');
           });
         });
   }
@@ -134,7 +135,7 @@ class _QuotationListPageState extends State<QuotationListPage> {
         await printQuotationOnPos(copy);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Quotation sent to the POS printer')),
+          SnackBar(content: Text(tr('Quotation sent to the POS printer'))),
         );
       }
     } catch (error) {
@@ -148,18 +149,18 @@ class _QuotationListPageState extends State<QuotationListPage> {
     if (_opening || row.id == 0) return;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete quotation'),
-        content: Text('Delete quotation ${row.number.isEmpty ? row.id : row.number}?'),
+      builder: (context) => oqDirection(AlertDialog(
+        title: Text(tr('Delete quotation')),
+        content: Text('${tr('Delete quotation')} ${row.number.isEmpty ? row.id : row.number}?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tr('Cancel'))),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB42318)),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(tr('Delete')),
           ),
         ],
-      ),
+      )),
     );
     if (confirmed != true || !mounted) return;
     final result = await Injection.quotations.deleteQuotation(
@@ -171,7 +172,7 @@ class _QuotationListPageState extends State<QuotationListPage> {
       case Success():
         _showRows();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Quotation deleted')),
+          SnackBar(content: Text(tr('Quotation deleted'))),
         );
       case Error(:final failure):
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failure.message)));
@@ -230,26 +231,28 @@ class _QuotationListPageState extends State<QuotationListPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _action(Icons.edit, Colors.blue, 'Edit', () => _edit(row)),
-        _action(Icons.delete, const Color(0xFFB42318), 'Delete', () => _delete(row)),
-        _action(Icons.print, const Color(0xFF1B7F3A), 'Print', () => _print(row)),
+        _action(Icons.edit, Colors.blue, tr('Edit'), () => _edit(row)),
+        _action(Icons.delete, const Color(0xFFB42318), tr('Delete'), () => _delete(row)),
+        _action(Icons.print, const Color(0xFF1B7F3A), tr('Print'), () => _print(row)),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return OrderQuotationScope(
+      child: Scaffold(
       backgroundColor: AppColors.homeSurface,
       appBar: AppBar(
         backgroundColor: AppColors.charcoal,
         foregroundColor: Colors.white,
-        title: const Text('Quotations'),
+        title: Text(tr('Quotations')),
         actions: [
+          const LanguageButton(light: true),
           IconButton(
             onPressed: () => _openForm(),
             icon: const Icon(Icons.add),
-            tooltip: 'New quotation',
+            tooltip: tr('New quotation'),
           ),
         ],
       ),
@@ -261,7 +264,7 @@ class _QuotationListPageState extends State<QuotationListPage> {
               controller: _search,
               onChanged: (_) => _showRows(),
               decoration: InputDecoration(
-                hintText: 'Search quotation or customer',
+                hintText: tr('Search quotation or customer'),
                 prefixIcon: const Icon(Icons.search),
                 filled: true,
                 fillColor: Colors.white,
@@ -276,11 +279,11 @@ class _QuotationListPageState extends State<QuotationListPage> {
               border: Border(bottom: BorderSide(color: AppColors.cardBorder)),
             ),
             child: _line(
-              const Text('Q. No', style: TextStyle(fontWeight: FontWeight.w700)),
-              const Text('Customer', style: TextStyle(fontWeight: FontWeight.w700)),
-              const Text('Amount', style: TextStyle(fontWeight: FontWeight.w700)),
-              const Center(
-                child: Text('Action', style: TextStyle(fontWeight: FontWeight.w700)),
+              Text(tr('Q. No'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(tr('Customer'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(tr('Amount'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              Center(
+                child: Text(tr('Action'), style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
             ),
           ),
@@ -326,6 +329,7 @@ class _QuotationListPageState extends State<QuotationListPage> {
           ),
         ],
       ),
+    ),
     );
   }
 }

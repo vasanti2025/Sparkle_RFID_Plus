@@ -20,7 +20,10 @@ abstract class QuotationRepository {
     String city = '',
     String state = '',
     String country = '',
+    int branchId = 0,
   });
+
+  Future<Result<List<({int id, String name})>>> loadBranches(String clientCode);
 
   Future<Result<List<StockItem>>> searchStock({
     required String clientCode,

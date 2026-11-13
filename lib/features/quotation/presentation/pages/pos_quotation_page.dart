@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/constants/app_constants.dart';
+import '../../../../core/locale/oq_text.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
@@ -61,6 +62,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   bool get _editing => _quotationId > 0;
 
   List<QuotationField> get _gridFields {
+    if (widget.orderMode) {
+      return _fieldsIn('middle').where((field) => !field.isCustomer).toList();
+    }
     final chosen = <String, QuotationField>{};
     final order = <String>[];
     for (final field in _layout) {
@@ -82,13 +86,19 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     return [for (final id in order) chosen[id]!];
   }
 
+  List<QuotationField> _fieldsIn(String place) {
+    final fields = [for (final field in _layout) if (field.place == place) field];
+    fields.sort((a, b) => a.priority.compareTo(b.priority));
+    return fields;
+  }
+
   String get _gstLabel {
     for (final field in _layout) {
       if (!field.isGstLabel) continue;
       final label = field.label.trim();
       if (label.isNotEmpty) return label;
     }
-    return 'GST 3%';
+    return tr('GST 3%');
   }
 
   double get _gstRate {
@@ -124,7 +134,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = widget.orderMode ? 'Sign in to load orders.' : 'Sign in to load quotations.';
+        _error = widget.orderMode ? tr('Sign in to load orders.') : tr('Sign in to load quotations.');
       });
       return;
     }
@@ -145,6 +155,16 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
           _layout = data;
           for (final field in data) {
             _fields.putIfAbsent(field.key, TextEditingController.new);
+          }
+          if (widget.orderMode) {
+            final today = _today();
+            for (final field in data) {
+              if (!field.type.toLowerCase().contains('date')) continue;
+              final controller = _fields[field.key];
+              if (controller == null || controller.text.isNotEmpty) continue;
+              final initial = _isDeliveryDate(field) ? today.add(const Duration(days: 7)) : today;
+              controller.text = _day(initial);
+            }
           }
         case Error(:final failure):
           _error = failure.message;
@@ -213,7 +233,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         await _scanLookup();
         return;
       }
-      _toast(read.error ?? 'No tag found');
+      _toast(read.error ?? tr('No tag found'));
       return;
     }
 
@@ -231,7 +251,11 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     }
     setState(() => _readingTag = false);
     if (added.isEmpty) {
-      _toast(matches.isEmpty ? 'Tags scanned but items were not found in stock.' : 'Already on this quotation');
+      _toast(
+        matches.isEmpty
+            ? tr('Tags scanned but items were not found in stock.')
+            : tr(widget.orderMode ? 'Already on this order' : 'Already on this quotation'),
+      );
       return;
     }
     await showQuotationItemsPopup(
@@ -257,7 +281,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       case Success(:final data) when data.isNotEmpty:
         _useItem(data.first);
       case Success():
-        _toast('No matching item');
+        _toast(tr('No matching item'));
       case Error(:final failure):
         _toast(failure.message);
     }
@@ -315,6 +339,16 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       aliases['stoneamt'] = ['stoneamt', 'stoneamount', 'totalstoneamount'];
       aliases['diamondamt'] = ['diamondamt', 'diamondamount', 'totaldiamondamount'];
       aliases.addAll(const {
+        'category': ['category', 'categoryname'],
+        'product': ['productname', 'name'],
+        'fixedmaking': ['makingfixedamt', 'fixmaking', 'makingfixed'],
+        'totalmakingamount': ['makingamt', 'makingamount'],
+        'totalitemamount': ['itemamt', 'itemamount', 'amount'],
+        'diamondpieces': ['diamondpcs', 'diamondpieces'],
+        'diamondrate': ['diamondrate'],
+        'quantity': ['quantity', 'pieces', 'pcs'],
+        'fixedwt': ['fixedwt', 'finewastagewt'],
+        'samplewt': ['samplewt'],
         'ratepergram': ['rate', 'ratepergram', 'todaysrate'],
         'todaysrate': ['rate', 'todaysrate', 'ratepergram'],
         'hallmark': ['hallmarkamt', 'hallmarkamount'],
@@ -330,6 +364,13 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         'fixmaking': ['makingfixedamt', 'fixmaking'],
         'sku': ['sku'],
         'purityname': ['purity', 'purityname'],
+        'color': ['color', 'colour', 'typesofcolor', 'typesodcolors', 'typeofcolor'],
+        'colour': ['colour', 'color', 'typesofcolor', 'typesodcolors'],
+        'typesofcolor': ['typesofcolor', 'color', 'typesodcolors', 'typeofcolor'],
+        'screw': ['screw', 'screwtype'],
+        'screwtype': ['screwtype', 'screw'],
+        'polish': ['polish', 'polishtype'],
+        'polishtype': ['polishtype', 'polish'],
       });
     }
     final names = <String>{
@@ -412,6 +453,10 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         ?_inputKey(field.keyToken),
         ?_inputKey(field.labelToken),
       };
+      if (widget.orderMode) {
+        final mapped = _orderInputKey(field.keyToken) ?? _orderInputKey(field.labelToken);
+        if (mapped != null) tokens.add(mapped);
+      }
       for (final token in tokens) {
         if (token.isEmpty) continue;
         extras[token] = text;
@@ -485,7 +530,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'hallmarkamount': 'hallmarkamt',
       'totalwt': 'totalwt',
       'totalweight': 'totalwt',
-      'packingwt': 'packingwt',
+      'packingwt': 'packingweight',
       'packingweight': 'packingwt',
       'fineper': 'fineper',
       'finepercentage': 'fineper',
@@ -503,7 +548,22 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'makingpergram': 'makingpergram',
       'makingpercentage': 'makingpercent',
       'fixmaking': 'makingfixedamt',
+      'fixedmaking': 'makingfixedamt',
       'makingfixed': 'makingfixedamt',
+      'totalmakingamount': 'makingamt',
+      'totalitemamount': 'itemamt',
+      'category': 'categoryname',
+      'product': 'productname',
+      'diamondpieces': 'diamondpcs',
+      'remarks': 'description',
+      'screw': 'screwtype',
+      'screwtype': 'screwtype',
+      'color': 'typesodcolors',
+      'colour': 'typesodcolors',
+      'typesofcolor': 'typesodcolors',
+      'typeofcolor': 'typesodcolors',
+      'polish': 'polish',
+      'polishtype': 'polish',
       'fixwastage': 'makingfixedwastage',
       'sku': 'sku',
       'purityname': 'purity',
@@ -578,13 +638,14 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     if (_saving) return;
     final customer = _customer;
     if (customer == null) {
-      _toast('Select a customer');
+      _toast(tr('Select a customer'));
       return;
     }
     if (_items.isEmpty) {
-      _toast('Add at least one item');
+      _toast(tr('Add at least one item'));
       return;
     }
+    if (widget.orderMode && !_datesAreValid()) return;
     setState(() => _saving = true);
     final editing = _editing;
     if (widget.orderMode) {
@@ -594,6 +655,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         items: List<StockItem>.from(_formItems),
         gstApplied: _gstOn,
         gstRate: _gstRate,
+        discount: _discount,
+        orderDate: _dateFromField('orderDate'),
+        deliveryDate: _dateFromField('deliveryDate'),
         id: _quotationId,
         number: _quotationNo,
         source: _source,
@@ -604,8 +668,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         case Success(:final data):
           Injection.orders.rememberCustomer(number: data, customerName: customer.name);
           final message = editing
-              ? 'Order updated successfully'
-              : (data.isEmpty ? 'Order saved' : 'Order $data saved');
+              ? tr('Order updated successfully')
+              : (data.isEmpty ? tr('Order saved') : '${tr('Order')} $data ${tr('saved')}');
           Navigator.pop(context, message);
         case Error(:final failure):
           _toast(failure.message);
@@ -639,8 +703,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
           ),
         );
         final message = editing
-            ? 'Quotation updated successfully'
-            : (data.isEmpty ? 'Quotation saved' : 'Quotation $data saved');
+            ? tr('Quotation updated successfully')
+            : (data.isEmpty ? tr('Quotation saved') : '${tr('Quotation')} $data ${tr('saved')}');
         Navigator.pop(context, message);
       case Error(:final failure):
         _toast(failure.message);
@@ -655,14 +719,14 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     if (items.isEmpty) {
       await showDialog<void>(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (context) => oqDirection(AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Items'),
-          content: const Text('No items available yet. Add an item to view the summary.'),
+          title: Text(tr('Items')),
+          content: Text(tr('No items available yet. Add an item to view the summary.')),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(tr('OK'))),
           ],
-        ),
+        )),
       );
     } else {
       await showQuotationItemsPopup(
@@ -670,6 +734,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         items: items,
         gstApplied: _gstOn,
         gstFraction: _gstRate,
+        orderLines: widget.orderMode
+            ? [for (final item in items) _orderPopupLines(item)]
+            : null,
       );
     }
     if (mounted) setState(() => _summaryPopup = false);
@@ -681,7 +748,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return OrderQuotationScope(
+      child: Scaffold(
       backgroundColor: AppColors.homeSurface,
       appBar: AppBar(
         elevation: 0,
@@ -689,15 +757,16 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         foregroundColor: AppColors.white,
         title: Text(
           widget.orderMode
-              ? (widget.detail == null ? 'Order' : 'Edit order')
-              : (widget.detail == null ? 'Quotation' : 'Edit quotation'),
+              ? (widget.detail == null ? tr('Order') : tr('Edit order'))
+              : (widget.detail == null ? tr('Quotation') : tr('Edit quotation')),
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         actions: [
+          const LanguageButton(light: true),
           IconButton(
             onPressed: _openSummaryPopup,
             icon: const Icon(Icons.view_list_outlined),
-            tooltip: 'Summary',
+            tooltip: tr('Summary'),
           ),
         ],
       ),
@@ -737,6 +806,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
                 _actions(),
               ],
             ),
+    ),
     );
   }
 
@@ -747,9 +817,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     );
     final hint = lookup?.placeholder.isNotEmpty == true
         ? lookup!.placeholder
-        : 'Select tag number';
+        : tr('Select tag number');
     return _labeledRow(
-      label: lookup?.label.isNotEmpty == true ? lookup!.label : 'Tag Number',
+      label: lookup?.label.isNotEmpty == true ? tr(lookup!.label) : tr('Tag Number'),
       child: _borderedRow(
         controller: _lookup,
         hint: hint,
@@ -758,7 +828,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
           IconButton(
             onPressed: _readTagIntoQuotation,
             icon: const Icon(Icons.qr_code_scanner, color: AppColors.goldText),
-            tooltip: 'Scan RFID tag',
+            tooltip: tr('Scan RFID tag'),
           ),
           _roundAdd(_pickItem),
         ],
@@ -794,6 +864,71 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
 
   Widget _control(QuotationField field) {
     final controller = _fields[field.key]!;
+    if (widget.orderMode && field.type.toLowerCase().contains('date')) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _header(field.label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: controller,
+            readOnly: true,
+            onTap: () => _pickDate(field, controller),
+            decoration: _fieldDecoration(suffixIcon: const Icon(Icons.calendar_today_outlined, size: 18)),
+          ),
+        ],
+      );
+    }
+    if (widget.orderMode && field.readOnly) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _header(field.label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: controller,
+            readOnly: true,
+            showCursor: false,
+            enableInteractiveSelection: false,
+            decoration: _fieldDecoration(),
+          ),
+        ],
+      );
+    }
+    final fixed = _fixedChoices(field);
+    if (fixed != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _header(field.label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: controller,
+            readOnly: true,
+            showCursor: false,
+            onTap: () => _pickFixed(field, fixed),
+            decoration: _fieldDecoration(suffixIcon: const Icon(Icons.arrow_drop_down)),
+          ),
+        ],
+      );
+    }
+    final catalog = _catalogKind(field);
+    if (catalog != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _header(field.label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: controller,
+            readOnly: true,
+            showCursor: false,
+            onTap: () => _pickCatalog(field, catalog),
+            decoration: _fieldDecoration(suffixIcon: const Icon(Icons.arrow_drop_down)),
+          ),
+        ],
+      );
+    }
     if (field.showsAsValue) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,30 +966,107 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
           inputFormatters: _numeric(field)
               ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))]
               : null,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.white,
-            isDense: true,
-            hintText: field.placeholder,
-            suffixText: field.suffix.isEmpty ? null : field.suffix,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.fieldBorder),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.fieldBorder),
-            ),
+          decoration: _fieldDecoration(
+            hint: field.placeholder,
+            suffix: field.suffix,
+            suffixIcon: widget.orderMode && field.type.toLowerCase().contains('drop')
+                ? const Icon(Icons.arrow_drop_down)
+                : null,
           ),
         ),
       ],
     );
   }
 
+  List<String>? _fixedChoices(QuotationField field) {
+    if (!widget.orderMode) return null;
+    final token = '${field.keyToken} ${field.labelToken}';
+    if (token.contains('screw')) {
+      return const ['Type 1', 'Type 2', 'Type 3'];
+    }
+    if (token.contains('polish')) {
+      return const ['High Polish', 'Matte Finish', 'Satin Finish', 'Hammered'];
+    }
+    if (!token.contains('diamond') && (token.contains('color') || token.contains('colour'))) {
+      return const [
+        'Yellow Gold',
+        'White Gold',
+        'Rose Gold',
+        'Green Gold',
+        'Black Gold',
+        'Blue Gold',
+        'Purple Gold',
+      ];
+    }
+    return null;
+  }
+
+  Future<void> _pickFixed(QuotationField field, List<String> choices) async {
+    final controller = _fields[field.key];
+    if (controller == null) return;
+    final current = controller.text.trim();
+    final options = <String>[
+      if (current.isNotEmpty && !choices.contains(current)) current,
+      ...choices,
+    ];
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => oqDirection(_CatalogPicker(title: field.label, choices: options)),
+    );
+    if (selected == null || !mounted) return;
+    controller.text = selected;
+    _queueOrderRefresh(field);
+    setState(() {});
+  }
+
+  String? _catalogKind(QuotationField field) {
+    if (!widget.orderMode || !field.type.toLowerCase().contains('drop')) return null;
+    final token = '${field.keyToken} ${field.labelToken}';
+    if (token.contains('category')) return 'category';
+    if (token.contains('product')) return 'product';
+    if (token.contains('design')) return 'design';
+    return null;
+  }
+
+  String _catalogValue(String kind, StockItem item) {
+    return switch (kind) {
+      'category' => item.extras['categoryname'] ?? item.extras['category'] ?? '',
+      'product' => item.extras['productname'] ?? item.name,
+      _ => item.design.isNotEmpty ? item.design : (item.extras['designname'] ?? ''),
+    }.trim();
+  }
+
+  List<String> _catalogChoices(String kind, String current) {
+    final values = <String>{};
+    if (current.isNotEmpty) values.add(current);
+    for (final item in Injection.quotations.labeledStockMatching(_clientCode, '')) {
+      final value = _catalogValue(kind, item);
+      if (value.isNotEmpty && value.toLowerCase() != 'null') values.add(value);
+    }
+    final choices = values.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return choices;
+  }
+
+  Future<void> _pickCatalog(QuotationField field, String kind) async {
+    final controller = _fields[field.key];
+    if (controller == null) return;
+    final choices = _catalogChoices(kind, controller.text.trim());
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => oqDirection(_CatalogPicker(title: field.label, choices: choices)),
+    );
+    if (selected == null || !mounted) return;
+    controller.text = selected;
+    _queueOrderRefresh(field);
+    setState(() {});
+  }
+
   Widget _header(String label) {
+    final shown = AppLanguage.instance.code == 'en' ? _shortHeader(label) : tr(label);
     return Text(
-      _shortHeader(label),
+      shown,
       maxLines: 1,
       softWrap: false,
       overflow: TextOverflow.ellipsis,
@@ -890,6 +1102,153 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
         kind.contains('amt');
   }
 
+  InputDecoration _fieldDecoration({String? hint, String suffix = '', Widget? suffixIcon}) {
+    return InputDecoration(
+      filled: true,
+      fillColor: Colors.white,
+      isDense: true,
+      hintText: hint == null || hint.isEmpty ? null : hint,
+      suffixText: suffix.isEmpty ? null : suffix,
+      suffixIcon: suffixIcon,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.fieldBorder),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.fieldBorder),
+      ),
+    );
+  }
+
+  String _day(DateTime date) {
+    final month = date.month.toString().padLeft(2, '0');
+    final day = date.day.toString().padLeft(2, '0');
+    return '${date.year}-$month-$day';
+  }
+
+  DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  bool _isDeliveryDate(QuotationField field) {
+    return '${field.keyToken} ${field.labelToken}'.contains('deliver');
+  }
+
+  bool _isOrderDate(QuotationField field) {
+    final token = '${field.keyToken} ${field.labelToken}';
+    return token.contains('order') && token.contains('date');
+  }
+
+  DateTime? _calendarDay(String text) {
+    final raw = text.trim();
+    if (raw.isEmpty) return null;
+    final written = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(raw);
+    if (written != null && !raw.contains('T')) {
+      return DateTime(
+        int.parse(written.group(1)!),
+        int.parse(written.group(2)!),
+        int.parse(written.group(3)!),
+      );
+    }
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    final local = parsed.toLocal();
+    return DateTime(local.year, local.month, local.day);
+  }
+
+  String _dateText(bool delivery) {
+    for (final field in _layout) {
+      if (!field.type.toLowerCase().contains('date')) continue;
+      final match = delivery ? _isDeliveryDate(field) : _isOrderDate(field);
+      if (!match) continue;
+      final text = _fields[field.key]?.text.trim() ?? '';
+      if (text.isNotEmpty) return text;
+    }
+    return _fields[delivery ? 'deliveryDate' : 'orderDate']?.text.trim() ?? '';
+  }
+
+  bool _datesAreValid() {
+    final today = _today();
+    final orderDay = _calendarDay(_dateText(false));
+    final deliverDay = _calendarDay(_dateText(true));
+    if (!_editing) {
+      if ((orderDay != null && orderDay.isBefore(today)) ||
+          (deliverDay != null && deliverDay.isBefore(today))) {
+        _toast(tr('Select today or a later date'));
+        return false;
+      }
+    }
+    if (orderDay != null && deliverDay != null && deliverDay.isBefore(orderDay)) {
+      _toast(tr('Delivery cannot be before the order date.'));
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _pickDate(QuotationField field, TextEditingController controller) async {
+    final today = _today();
+    var first = today;
+    if (_isDeliveryDate(field)) {
+      final orderDay = _calendarDay(_dateText(false));
+      if (orderDay != null && orderDay.isAfter(first)) first = orderDay;
+    }
+    final current = _calendarDay(controller.text);
+    var initial = current == null || current.isBefore(first) ? first : current;
+    final last = DateTime(2035);
+    if (initial.isAfter(last)) initial = last;
+    final picked = await showDatePicker(
+      context: context,
+      firstDate: first,
+      lastDate: last,
+      initialDate: initial,
+    );
+    if (picked == null || !mounted) return;
+    final day = DateTime(picked.year, picked.month, picked.day);
+    setState(() {
+      controller.text = _day(day);
+      if (!_isOrderDate(field)) return;
+      for (final other in _layout) {
+        if (!_isDeliveryDate(other)) continue;
+        final delivery = _fields[other.key];
+        if (delivery == null) continue;
+        final deliverDay = _calendarDay(delivery.text);
+        if (deliverDay != null && deliverDay.isBefore(day)) delivery.text = _day(day);
+      }
+    });
+  }
+
+  DateTime? _dateFromField(String key) {
+    final text = _dateText(key.toLowerCase().contains('deliver'));
+    final day = _calendarDay(text);
+    if (day == null) return null;
+    final now = DateTime.now();
+    return DateTime(day.year, day.month, day.day, now.hour, now.minute, now.second);
+  }
+
+  double get _discount => double.tryParse((_fields['discount']?.text ?? '').replaceAll(',', '').trim()) ?? 0;
+
+  List<(String, String)> _orderPopupLines(StockItem item) {
+    return [
+      for (final field in _fieldsIn('summarytable'))
+        (field.label, _summaryCell(field, item)),
+    ];
+  }
+
+  String _summaryCell(QuotationField field, StockItem item) {
+    if (field.keyToken == 'itemdetails') {
+      if (item.itemCode.isNotEmpty) return item.itemCode;
+      if (item.design.isNotEmpty) return item.design;
+      if (item.name.isNotEmpty) return item.name;
+    }
+    final value = _valueFor(field, item);
+    if (value != null && value.isNotEmpty) return value;
+    if (field.keyToken == 'quantity') return '1';
+    return '—';
+  }
+
   Widget _summaryCard() {
     return Material(
       color: Colors.white,
@@ -905,8 +1264,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
               children: [
                 const Icon(Icons.receipt_long_outlined, color: AppColors.muted),
                 const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('Summary', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                Expanded(
+                  child: Text(tr('Summary'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                 ),
                 Switch(
                   value: _summaryPopup,
@@ -934,8 +1293,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
             Row(
               children: [
                 _metric('Qty', '${_items.length}'),
-                _metric('Gross Wt', '${_gross.toStringAsFixed(3)} g'),
-                _metric('Amount', '₹ ${_itemAmount.toStringAsFixed(2)}', alignEnd: true),
+                _metric(tr('Gross Wt'), '${_gross.toStringAsFixed(3)} g'),
+                _metric(tr('Amount'), '₹ ${_itemAmount.toStringAsFixed(2)}', alignEnd: true),
               ],
             ),
           ],
@@ -973,9 +1332,9 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
             ],
           ),
         ),
-        Expanded(child: _amountBox('GST Amt', _gst)),
+        Expanded(child: _amountBox(tr('GST Amt'), _gst)),
         const SizedBox(width: 8),
-        Expanded(child: _amountBox('Total (with GST)', _itemAmount + _gst)),
+        Expanded(child: _amountBox(tr('Total (with GST)'), _itemAmount + _gst)),
       ],
     );
   }
@@ -1013,11 +1372,11 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
           child: Row(
             children: [
-              Expanded(child: _action('Cancel', Icons.close, AppColors.charcoal, () => Navigator.pop(context))),
+              Expanded(child: _action(tr('Cancel'), Icons.close, AppColors.charcoal, () => Navigator.pop(context))),
               const SizedBox(width: 8),
               Expanded(
                 child: _action(
-                  _readingTag ? (_seenTags == 0 ? 'Scanning' : 'Scan $_seenTags') : 'Scan',
+                  _readingTag ? (_seenTags == 0 ? tr('Scanning') : '${tr('Scan')} $_seenTags') : tr('Scan'),
                   Icons.qr_code_scanner,
                   AppColors.charcoal,
                   _readingTag ? null : _readTagIntoQuotation,
@@ -1026,7 +1385,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: _action(
-                  _saving ? (_editing ? 'Updating' : 'Saving') : (_editing ? 'Update' : 'Save'),
+                  _saving ? (_editing ? tr('Updating') : tr('Saving')) : (_editing ? tr('Update') : tr('Save')),
                   Icons.save_outlined,
                   AppColors.charcoal,
                   _saving ? null : _save,
@@ -1060,13 +1419,13 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     );
     return _labeledRow(
       label: customerField?.label.isNotEmpty == true
-          ? customerField!.label
-          : (widget.orderMode ? 'Select customer' : 'Customer Name'),
+          ? tr(customerField!.label)
+          : tr(widget.orderMode ? 'Select customer' : 'Customer Name'),
       child: _borderedRow(
         controller: _customerName,
         hint: customerField?.placeholder.isNotEmpty == true
-            ? customerField!.placeholder
-            : 'Select customer',
+            ? tr(customerField!.placeholder)
+            : tr('Select customer'),
         readOnly: true,
         onTap: _chooseCustomer,
         actions: [_roundAdd(_openAddCustomer)],
@@ -1162,7 +1521,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     final selected = await showModalBottomSheet<CustomerRecord>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _PosCustomerSheet(index: _customers),
+      builder: (context) => oqDirection(_PosCustomerSheet(index: _customers)),
     );
     if (selected != null) {
       setState(() {
@@ -1249,6 +1608,71 @@ class _ErrorState extends StatelessWidget {
             FilledButton(onPressed: onRetry, child: const Text('Retry')),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _CatalogPicker extends StatefulWidget {
+  const _CatalogPicker({required this.title, required this.choices});
+
+  final String title;
+  final List<String> choices;
+
+  @override
+  State<_CatalogPicker> createState() => _CatalogPickerState();
+}
+
+class _CatalogPickerState extends State<_CatalogPicker> {
+  final TextEditingController _query = TextEditingController();
+  late List<String> _matches = widget.choices;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final height = MediaQuery.sizeOf(context).height * 0.7;
+    return SizedBox(
+      height: height,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: TextField(
+              controller: _query,
+              decoration: InputDecoration(
+                hintText: tr(widget.title),
+                prefixIcon: const Icon(Icons.search),
+              ),
+              onChanged: (value) {
+                final needle = value.trim().toLowerCase();
+                setState(() {
+                  _matches = needle.isEmpty
+                      ? widget.choices
+                      : widget.choices.where((choice) => choice.toLowerCase().contains(needle)).toList();
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: _matches.isEmpty
+                ? Center(child: Text(tr('No matching item')))
+                : ListView.builder(
+                    itemCount: _matches.length,
+                    itemBuilder: (context, index) {
+                      final choice = _matches[index];
+                      return ListTile(
+                        title: Text(choice),
+                        onTap: () => Navigator.pop(context, choice),
+                      );
+                    },
+                  ),
+          ),
+        ],
       ),
     );
   }

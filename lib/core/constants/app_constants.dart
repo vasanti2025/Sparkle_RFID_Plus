@@ -6,6 +6,7 @@ abstract final class AppConstants {
 
   static const getAllCustomers = '/api/ClientOnboarding/GetAllCustomer';
   static const addCustomer = '/api/ClientOnboarding/AddCustomer';
+  static const getAllBranchMaster = '/api/ClientOnboarding/GetAllBranchMaster';
   static const getAllLabeledStock = '/api/ProductMaster/GetAllLabeledStock';
   static const getAllDailyRate = '/api/ProductMaster/GetAllDailyRate';
   static const getAllQuotation = '/api/Order/GetAllQuotation';
@@ -19,7 +20,7 @@ abstract final class AppConstants {
       '/api/RoleManagement/GetAllUserPermissions-Optimized';
 
   static const quotationPageName = 'mob_quotation';
-  static const orderPageName = 'new_custom_order';
+  static const orderPageName = 'mob_order';
   static const getAllOrders = '/api/Order/GetAllOrders';
   static const addCustomOrder = '/api/Order/AddCustomOrder';
   static const updateCustomOrder = '/api/Order/UpdateCustomOrder';

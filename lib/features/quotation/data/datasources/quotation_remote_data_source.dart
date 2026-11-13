@@ -51,6 +51,7 @@ class QuotationRemoteDataSource {
     String city = '',
     String state = '',
     String country = '',
+    int branchId = 0,
   }) async {
     final parts = name.trim().split(RegExp(r'\s+'));
     final first = parts.first;
@@ -90,6 +91,7 @@ class QuotationRemoteDataSource {
       'FineSilver': '0',
       'GstNo': gst,
       'ClientCode': clientCode,
+      if (branchId > 0) 'BranchId': branchId,
       'VendorId': 0,
       'Remark': '',
       'AddToVendor': false,
@@ -103,6 +105,20 @@ class QuotationRemoteDataSource {
       }
     }
     return CustomerRecord(id: 0, name: name.trim(), mobile: mobile, email: email);
+  }
+
+  Future<List<({int id, String name})>> loadBranches(String clientCode) async {
+    final body = await _api.post(AppConstants.getAllBranchMaster, {
+      'ClientCode': clientCode,
+    });
+    final branches = <({int id, String name})>[];
+    for (final row in _maps(body)) {
+      final id = _int(row['Id'] ?? row['BranchId']);
+      final name = _text(row, const ['BranchName', 'Name']);
+      if (id <= 0 || name.isEmpty) continue;
+      branches.add((id: id, name: name));
+    }
+    return branches;
   }
 
   Future<List<StockItem>> searchStock({
@@ -564,6 +580,7 @@ class QuotationRemoteDataSource {
           ? {
               'ClientCode': clientCode,
               'PageName': pageName,
+              'isMobView': true,
             }
           : {
               'ClientCode': clientCode,
@@ -589,6 +606,8 @@ class QuotationRemoteDataSource {
         if (key.isEmpty) continue;
         final editable = '${row['isEditable'] ?? row['IsEditable'] ?? 'true'}'
             .toLowerCase();
+        final markedReadOnly = editable == 'false' ||
+            _bool(row['readOnly'] ?? row['ReadOnly'] ?? row['isReadOnly']);
         fields.add(
           QuotationField(
             key: key,
@@ -597,8 +616,9 @@ class QuotationRemoteDataSource {
             place: '${row['place'] ?? 'middle'}'.toLowerCase(),
             priority: _int(row['priority']),
             type: '${row['type'] ?? 'text'}',
-            readOnly: editable == 'false' ||
-                _bool(row['readOnly'] ?? row['ReadOnly'] ?? row['isReadOnly']),
+            readOnly: orderPage
+                ? markedReadOnly || visibility == 'readonly' || visibility == 'read'
+                : markedReadOnly,
             suffix: _text(row, const ['suffix', 'Suffix', 'unit', 'Unit']),
           ),
         );
