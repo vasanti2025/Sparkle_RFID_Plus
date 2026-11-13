@@ -20,7 +20,7 @@ abstract final class AppStrings {
   static const passwordHint = 'Enter your password';
   static const showPassword = 'Show password';
   static const hidePassword = 'Hide password';
-  static const rememberUsername = 'Remember username';
+  static const rememberUsername = 'Remember me';
   static const forgotPassword = 'Forgot password?';
   static const resetYourPassword = 'Reset your password';
   static const resetPasswordNote =

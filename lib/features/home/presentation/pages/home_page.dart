@@ -236,8 +236,9 @@ class _PrimaryActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return IntrinsicHeight(
+      child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
           child: _ActionCard(
@@ -269,6 +270,7 @@ class _PrimaryActions extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }
@@ -306,14 +308,14 @@ class _ActionCard extends StatelessWidget {
         onTap: onTap,
         customBorder: shape,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 148),
+          constraints: const BoxConstraints(minHeight: 128),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(icon, color: iconColor, size: 28),
-                const SizedBox(height: 28),
+                const SizedBox(height: 16),
                 Text(
                   title,
                   style: _text(

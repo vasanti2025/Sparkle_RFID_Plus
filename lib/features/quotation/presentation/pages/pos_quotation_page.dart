@@ -18,7 +18,6 @@ import '../../../orders/domain/order_math.dart';
 import '../../domain/quotation_math.dart';
 import '../../domain/entities/stock_item.dart';
 import '../widgets/quotation_items_popup.dart';
-import '../widgets/stock_picker_sheet.dart';
 import 'add_customer_page.dart';
 
 class PosQuotationPage extends StatefulWidget {
@@ -36,6 +35,9 @@ class PosQuotationPage extends StatefulWidget {
 class _PosQuotationPageState extends State<PosQuotationPage> {
   final Map<String, TextEditingController> _fields = {};
   final TextEditingController _lookup = TextEditingController();
+  Timer? _tagSuggestTimer;
+  var _tagSuggestToken = 0;
+  List<StockItem> _suggestions = const [];
   final TextEditingController _customerName = TextEditingController();
   List<QuotationField> _layout = const [];
   CustomerIndex _customers = CustomerIndex(const []);
@@ -52,6 +54,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   var _orderRefreshQueued = false;
   QuotationField? _orderEditedField;
   Map<String, double> _purityRates = const {};
+  List<({int id, String name})> _branches = const [];
+  int _quotationBranchId = 0;
   String? _error;
   int _quotationId = 0;
   String _quotationNo = '';
@@ -65,6 +69,10 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     if (widget.orderMode) {
       return _fieldsIn('middle').where((field) => !field.isCustomer).toList();
     }
+    return _quotationGrid(_dedupedQuotationFields());
+  }
+
+  List<QuotationField> _dedupedQuotationFields() {
     final chosen = <String, QuotationField>{};
     final order = <String>[];
     for (final field in _layout) {
@@ -84,6 +92,80 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       }
     }
     return [for (final id in order) chosen[id]!];
+  }
+
+  bool _isQuotationKind(QuotationField field, String kind) {
+    final token = '${field.keyToken} ${field.labelToken}';
+    return switch (kind) {
+      'category' => token.contains('category'),
+      'product' => token.contains('product') && !token.contains('code'),
+      'branch' => token.contains('branch'),
+      'design' => token.contains('design'),
+      _ => false,
+    };
+  }
+
+  List<QuotationField> _quotationGrid(List<QuotationField> fields) {
+    const added = <QuotationField>[
+      QuotationField(
+        key: 'branchname',
+        label: 'Branch',
+        placeholder: '',
+        place: 'middle',
+        priority: 0,
+        type: 'dropdown',
+      ),
+      QuotationField(
+        key: 'categoryname',
+        label: 'Category',
+        placeholder: '',
+        place: 'middle',
+        priority: 0,
+        type: 'dropdown',
+      ),
+      QuotationField(
+        key: 'productname',
+        label: 'Product',
+        placeholder: '',
+        place: 'middle',
+        priority: 0,
+        type: 'dropdown',
+      ),
+    ];
+    final rest = <QuotationField>[];
+    final leaders = <QuotationField>[];
+    for (final field in fields) {
+      if (_isQuotationKind(field, 'category') ||
+          _isQuotationKind(field, 'product') ||
+          _isQuotationKind(field, 'branch')) {
+        leaders.add(field);
+      } else {
+        rest.add(field);
+      }
+    }
+    for (final field in added) {
+      final kind = _isQuotationKind(field, 'category')
+          ? 'category'
+          : _isQuotationKind(field, 'product')
+          ? 'product'
+          : 'branch';
+      if (leaders.any((current) => _isQuotationKind(current, kind))) continue;
+      leaders.add(field);
+    }
+    int rank(QuotationField field) {
+      if (_isQuotationKind(field, 'branch')) return 0;
+      if (_isQuotationKind(field, 'category')) return 1;
+      return 2;
+    }
+
+    leaders.sort((a, b) => rank(a).compareTo(rank(b)));
+    return [...leaders, ...rest];
+  }
+
+  void _ensureGridControllers() {
+    for (final field in _gridFields) {
+      _fields.putIfAbsent(field.key, TextEditingController.new);
+    }
   }
 
   List<QuotationField> _fieldsIn(String place) {
@@ -113,6 +195,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     _rfidTrigger.attach(_readTagIntoQuotation);
     if (_clientCode.isNotEmpty) {
       unawaited(Injection.quotations.warmLabeledStock(_clientCode, () {}));
+      if (!widget.orderMode) unawaited(_loadQuotationBranches());
     }
     _load();
   }
@@ -124,6 +207,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     for (final controller in _fields.values) {
       controller.dispose();
     }
+    _tagSuggestTimer?.cancel();
     _lookup.dispose();
     _customerName.dispose();
     super.dispose();
@@ -144,7 +228,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       pageName: widget.orderMode ? AppConstants.orderPageName : AppConstants.quotationPageName,
     );
     final customers = await Injection.quotations.loadCustomers(_clientCode);
-    if (widget.orderMode && _clientCode.isNotEmpty) {
+    if (_clientCode.isNotEmpty) {
       _purityRates = await Injection.orders.dailyRates(_clientCode);
     }
     if (!mounted) return;
@@ -156,6 +240,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
           for (final field in data) {
             _fields.putIfAbsent(field.key, TextEditingController.new);
           }
+          _ensureGridControllers();
           if (widget.orderMode) {
             final today = _today();
             for (final field in data) {
@@ -189,19 +274,69 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
             if (value == null) continue;
             _fields[field.key]?.text = value;
           }
+          final savedBranch = int.tryParse(item.extras['branchid'] ?? '') ?? 0;
+          if (savedBranch > 0) _quotationBranchId = savedBranch;
         }
       }
+      if (!widget.orderMode) _applyDefaultBranch();
     });
   }
 
+  Future<void> _loadQuotationBranches() async {
+    final result = await Injection.quotations.loadBranches(_clientCode);
+    if (!mounted || result is! Success<List<({int id, String name})>>) return;
+    setState(() {
+      _branches = result.data;
+      _applyDefaultBranch();
+    });
+  }
+
+  void _applyDefaultBranch() {
+    if (widget.orderMode || _branches.isEmpty) return;
+    var shown = '';
+    TextEditingController? empty;
+    for (final field in _gridFields) {
+      if (!_isQuotationKind(field, 'branch')) continue;
+      final controller = _fields[field.key];
+      final text = controller?.text.trim() ?? '';
+      if (text.isNotEmpty) {
+        shown = text;
+        break;
+      }
+      empty ??= controller;
+    }
+    if (shown.isNotEmpty) {
+      final named = _branches.where((branch) => branch.name == shown);
+      if (named.isNotEmpty) _quotationBranchId = named.first.id;
+      return;
+    }
+    final preferred = _quotationBranchId > 0 ? _quotationBranchId : AppSession.branchId;
+    final match = _branches.where((branch) => branch.id == preferred);
+    final branch = match.isEmpty ? _branches.first : match.first;
+    _quotationBranchId = branch.id;
+    if (empty != null && empty.text.trim().isEmpty) empty.text = branch.name;
+  }
+
   Future<void> _pickItem() async {
-    final item = await showStockPicker(
+    await showModalBottomSheet<void>(
       context: context,
-      clientCode: _clientCode,
-      initialQuery: _lookup.text,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFAF9F7),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (context) => oqDirection(
+        _AddPieceSheet(
+          clientCode: _clientCode,
+          initialQuery: _lookup.text,
+          alreadyAdded: _alreadyAdded,
+          onAdd: (item) {
+            if (!mounted) return;
+            _useItem(item);
+          },
+        ),
+      ),
     );
-    if (item == null || !mounted) return;
-    _useItem(item);
   }
 
   Future<void> _readTagIntoQuotation() async {
@@ -266,6 +401,66 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     );
   }
 
+  void _onTagChanged(String value) {
+    _tagSuggestTimer?.cancel();
+    final query = value.trim();
+    if (query.length < 2 || _clientCode.isEmpty) {
+      if (_suggestions.isEmpty) return;
+      setState(() => _suggestions = const []);
+      return;
+    }
+    final local = Injection.quotations.labeledStockMatching(_clientCode, query);
+    if (local.isNotEmpty) {
+      setState(() => _suggestions = local.length > 40 ? local.sublist(0, 40) : local);
+      return;
+    }
+    final token = ++_tagSuggestToken;
+    _tagSuggestTimer = Timer(const Duration(milliseconds: 280), () {
+      _searchTagSuggestions(query, token);
+    });
+  }
+
+  Future<void> _searchTagSuggestions(String query, int token) async {
+    final result = await Injection.quotations.searchStock(
+      clientCode: _clientCode,
+      query: query,
+    );
+    if (!mounted || token != _tagSuggestToken) return;
+    if (_lookup.text.trim() != query) return;
+    if (result case Success(:final data)) {
+      setState(() => _suggestions = data.length > 40 ? data.sublist(0, 40) : data);
+    }
+  }
+
+  void _chooseSuggestion(StockItem item) {
+    if (_alreadyAdded(item)) return;
+    _suggestions = const [];
+    _useItem(item);
+  }
+
+  bool _alreadyAdded(StockItem item) {
+    return _items.any((current) => current.identity == item.identity);
+  }
+
+  Widget _suggestionList() {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: ListView.builder(
+        shrinkWrap: true,
+        itemCount: _suggestions.length,
+        itemBuilder: (context, index) {
+          final item = _suggestions[index];
+          final added = _alreadyAdded(item);
+          return _PieceSuggestTile(
+            item: item,
+            added: added,
+            onAdd: added ? null : () => _chooseSuggestion(item),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _scanLookup() async {
     final query = _lookup.text.trim();
     if (query.isEmpty || _clientCode.isEmpty) {
@@ -316,6 +511,12 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   String? _valueFor(QuotationField field, StockItem item) {
     final aliases = <String, List<String>>{
       'designname': ['designname', 'design'],
+      'categoryname': ['categoryname', 'category'],
+      'category': ['category', 'categoryname'],
+      'productname': ['productname', 'name'],
+      'product': ['productname', 'name'],
+      'branchname': ['branchname', 'branch'],
+      'branch': ['branch', 'branchname'],
       'purity': ['purity'],
       'pieces': ['pieces', 'pcs', 'piece'],
       'grosswt': ['grosswt', 'grossweight', 'gross'],
@@ -456,6 +657,8 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       if (widget.orderMode) {
         final mapped = _orderInputKey(field.keyToken) ?? _orderInputKey(field.labelToken);
         if (mapped != null) tokens.add(mapped);
+      } else if (_quotationBranchId > 0 && _isQuotationKind(field, 'branch')) {
+        extras['branchid'] = '$_quotationBranchId';
       }
       for (final token in tokens) {
         if (token.isEmpty) continue;
@@ -515,6 +718,12 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       'purity': 'purity',
       'design': 'designname',
       'designname': 'designname',
+      'category': 'categoryname',
+      'categoryname': 'categoryname',
+      'product': 'productname',
+      'productname': 'productname',
+      'branch': 'branchname',
+      'branchname': 'branchname',
       'hsn': 'hsncode',
       'hsncode': 'hsncode',
       'diamondpcs': 'diamondpcs',
@@ -685,6 +894,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       id: _quotationId,
       number: _quotationNo,
       source: _source,
+      branchId: _quotationBranchId,
     );
     if (!mounted) return;
     setState(() => _saving = false);
@@ -794,6 +1004,10 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
                         const SizedBox(height: 12),
                       ],
                       _lookupBar(),
+                      if (_suggestions.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _suggestionList(),
+                      ],
                       const SizedBox(height: 16),
                       ..._rows(_gridFields),
                       const SizedBox(height: 8),
@@ -823,6 +1037,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
       child: _borderedRow(
         controller: _lookup,
         hint: hint,
+        onChanged: _onTagChanged,
         onSubmitted: (_) => _scanLookup(),
         actions: [
           IconButton(
@@ -891,6 +1106,22 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
             showCursor: false,
             enableInteractiveSelection: false,
             decoration: _fieldDecoration(),
+          ),
+        ],
+      );
+    }
+    if (!widget.orderMode && _isQuotationKind(field, 'branch')) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _header(field.label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: controller,
+            readOnly: true,
+            showCursor: false,
+            onTap: () => _pickBranch(field),
+            decoration: _fieldDecoration(suffixIcon: const Icon(Icons.arrow_drop_down)),
           ),
         ],
       );
@@ -1020,12 +1251,53 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     setState(() {});
   }
 
+  Future<void> _pickBranch(QuotationField field) async {
+    final controller = _fields[field.key];
+    if (controller == null) return;
+    final names = [for (final branch in _branches) branch.name];
+    final current = controller.text.trim();
+    final options = <String>[
+      if (current.isNotEmpty && !names.contains(current)) current,
+      ...names,
+    ];
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => oqDirection(_CatalogPicker(title: field.label, choices: options)),
+    );
+    if (selected == null || !mounted) return;
+    final match = _branches.where((branch) => branch.name == selected);
+    setState(() {
+      controller.text = selected;
+      if (match.isNotEmpty) _quotationBranchId = match.first.id;
+    });
+  }
+
+  String _quotationChoice(String kind) {
+    for (final field in _gridFields) {
+      if (!_isQuotationKind(field, kind)) continue;
+      final text = _fields[field.key]?.text.trim().toLowerCase() ?? '';
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+
   String? _catalogKind(QuotationField field) {
-    if (!widget.orderMode || !field.type.toLowerCase().contains('drop')) return null;
     final token = '${field.keyToken} ${field.labelToken}';
+    final drop = field.type.toLowerCase().contains('drop');
+    if (widget.orderMode) {
+      if (!drop) return null;
+      if (token.contains('category')) return 'category';
+      if (token.contains('product')) return 'product';
+      if (token.contains('design')) return 'design';
+      return null;
+    }
+    final kind = field.type.toLowerCase();
+    if (kind.contains('number') || kind.contains('date')) return null;
     if (token.contains('category')) return 'category';
-    if (token.contains('product')) return 'product';
+    if (token.contains('product') && !token.contains('code')) return 'product';
     if (token.contains('design')) return 'design';
+    if (token.contains('purity')) return 'purity';
     return null;
   }
 
@@ -1033,6 +1305,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     return switch (kind) {
       'category' => item.extras['categoryname'] ?? item.extras['category'] ?? '',
       'product' => item.extras['productname'] ?? item.name,
+      'purity' => item.extras['purityname'] ?? item.extras['purity'] ?? '',
       _ => item.design.isNotEmpty ? item.design : (item.extras['designname'] ?? ''),
     }.trim();
   }
@@ -1040,7 +1313,26 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
   List<String> _catalogChoices(String kind, String current) {
     final values = <String>{};
     if (current.isNotEmpty) values.add(current);
+    final selectedCategory = widget.orderMode ? '' : _quotationChoice('category');
+    final selectedProduct = widget.orderMode ? '' : _quotationChoice('product');
+    if (!widget.orderMode && kind == 'purity') {
+      for (final name in _purityRates.keys) {
+        final trimmed = name.trim();
+        if (trimmed.isNotEmpty) values.add(trimmed);
+      }
+    }
     for (final item in Injection.quotations.labeledStockMatching(_clientCode, '')) {
+      if (!widget.orderMode && kind == 'product' && selectedCategory.isNotEmpty) {
+        final itemCategory = _catalogValue('category', item).toLowerCase();
+        if (itemCategory.isNotEmpty && itemCategory != selectedCategory) continue;
+      }
+      if (!widget.orderMode && kind == 'design' && selectedProduct.isNotEmpty) {
+        final itemProduct = _catalogValue('product', item).toLowerCase();
+        if (itemProduct.isNotEmpty && itemProduct != selectedProduct) continue;
+      } else if (!widget.orderMode && kind == 'design' && selectedCategory.isNotEmpty) {
+        final itemCategory = _catalogValue('category', item).toLowerCase();
+        if (itemCategory.isNotEmpty && itemCategory != selectedCategory) continue;
+      }
       final value = _catalogValue(kind, item);
       if (value.isNotEmpty && value.toLowerCase() != 'null') values.add(value);
     }
@@ -1450,6 +1742,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
     required List<Widget> actions,
     bool readOnly = false,
     VoidCallback? onTap,
+    ValueChanged<String>? onChanged,
     ValueChanged<String>? onSubmitted,
   }) {
     return DecoratedBox(
@@ -1466,6 +1759,7 @@ class _PosQuotationPageState extends State<PosQuotationPage> {
               readOnly: readOnly,
               onTap: onTap,
               textInputAction: TextInputAction.search,
+              onChanged: onChanged,
               onSubmitted: onSubmitted,
               decoration: InputDecoration(
                 hintText: hint,
@@ -1673,6 +1967,206 @@ class _CatalogPickerState extends State<_CatalogPicker> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PieceSuggestTile extends StatelessWidget {
+  const _PieceSuggestTile({
+    required this.item,
+    required this.added,
+    required this.onAdd,
+  });
+
+  final StockItem item;
+  final bool added;
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final name = item.name.trim().isEmpty ? tr('Piece') : item.name.trim();
+    final code = item.itemCode.trim().isEmpty ? item.rfid : item.itemCode;
+    final gross = item.gross.trim();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: const Color(0xFFF4EFE4),
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: onAdd,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFAF6EE),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.diamond_outlined, color: AppColors.goldText),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$code · $name',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        added ? tr('Already added') : (gross.isEmpty ? '—' : '${tr('Gross')} $gross g'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: added ? const Color(0xFF8A7A58) : AppColors.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(added ? Icons.check : Icons.add, color: AppColors.charcoal),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddPieceSheet extends StatefulWidget {
+  const _AddPieceSheet({
+    required this.clientCode,
+    required this.initialQuery,
+    required this.alreadyAdded,
+    required this.onAdd,
+  });
+
+  final String clientCode;
+  final String initialQuery;
+  final bool Function(StockItem item) alreadyAdded;
+  final ValueChanged<StockItem> onAdd;
+
+  @override
+  State<_AddPieceSheet> createState() => _AddPieceSheetState();
+}
+
+class _AddPieceSheetState extends State<_AddPieceSheet> {
+  late final TextEditingController _query = TextEditingController(text: widget.initialQuery);
+  List<StockItem> _items = const [];
+  var _waiting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+    if (widget.clientCode.isNotEmpty) {
+      Injection.quotations.warmLabeledStock(widget.clientCode, () {
+        if (mounted) _refresh();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  void _refresh() {
+    final query = _query.text.trim();
+    final local = Injection.quotations.labeledStockMatching(widget.clientCode, query);
+    setState(() {
+      _items = local.length > 40 ? local.sublist(0, 40) : local;
+      _waiting = local.isEmpty && query.length >= 2;
+    });
+    if (query.length < 2 || local.isNotEmpty || widget.clientCode.isEmpty) return;
+    _search(query);
+  }
+
+  Future<void> _search(String query) async {
+    final result = await Injection.quotations.searchStock(
+      clientCode: widget.clientCode,
+      query: query,
+    );
+    if (!mounted || _query.text.trim() != query) return;
+    if (result case Success(:final data)) {
+      setState(() {
+        _items = data.length > 40 ? data.sublist(0, 40) : data;
+        _waiting = false;
+      });
+      return;
+    }
+    if (mounted) setState(() => _waiting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final height = MediaQuery.sizeOf(context).height * 0.86;
+    return SizedBox(
+      height: height,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    tr('Add a piece'),
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.charcoal),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, color: AppColors.charcoal),
+                ),
+              ],
+            ),
+            TextField(
+              controller: _query,
+              decoration: InputDecoration(
+                hintText: tr('RFID or item code'),
+                prefixIcon: const Icon(Icons.search),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+              onChanged: (_) => _refresh(),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _waiting
+                  ? const Center(child: CircularProgressIndicator(color: AppColors.goldText))
+                  : ListView.builder(
+                      itemCount: _items.length,
+                      itemBuilder: (context, index) {
+                        final item = _items[index];
+                        final added = widget.alreadyAdded(item);
+                        return _PieceSuggestTile(
+                          item: item,
+                          added: added,
+                          onAdd: added
+                              ? null
+                              : () {
+                                  widget.onAdd(item);
+                                  setState(() {});
+                                },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

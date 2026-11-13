@@ -327,6 +327,7 @@ class QuotationRemoteDataSource {
     int id = 0,
     String number = '',
     Map<String, dynamic> source = const {},
+    int branchId = 0,
   }) async {
     final quotationNo = id > 0 && number.isNotEmpty ? number : await _nextQuotationNo(clientCode);
     final payload = _quotationPayload(
@@ -338,6 +339,7 @@ class QuotationRemoteDataSource {
       id: id,
       number: quotationNo,
       source: source,
+      branchId: branchId,
     );
     final path = id > 0 ? AppConstants.updateQuotation : AppConstants.addQuotation;
     final body = await _api.post(path, payload);
@@ -415,6 +417,7 @@ class QuotationRemoteDataSource {
     required int id,
     required String number,
     required Map<String, dynamic> source,
+    int branchId = 0,
   }) {
     final names = customer.name.trim().split(RegExp(r'\s+'));
     final first = names.isEmpty ? '' : names.first;
@@ -469,7 +472,7 @@ class QuotationRemoteDataSource {
       'QuotationItem': quotationItems,
       'ClientCode': clientCode,
       'CompanyId': 1,
-      'BranchId': 1,
+      'BranchId': branchId > 0 ? branchId : 1,
       'BaseCurrency': 'INR',
       'BillType': 'sale',
       'SaleType': 'quotation',

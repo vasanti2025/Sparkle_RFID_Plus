@@ -29,6 +29,7 @@ class AuthRepositoryImpl implements AuthRepository {
       await localDataSource.saveSession(user);
       if (rememberMe) {
         await localDataSource.saveRememberedUsername(username);
+        await localDataSource.saveRememberedPassword(password);
       } else {
         await localDataSource.clearRememberedUsername();
       }
@@ -45,6 +46,11 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<String?> rememberedUsername() {
     return localDataSource.readRememberedUsername();
+  }
+
+  @override
+  Future<String?> rememberedPassword() {
+    return localDataSource.readRememberedPassword();
   }
 
   @override

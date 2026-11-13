@@ -63,6 +63,7 @@ abstract class QuotationRepository {
     int id = 0,
     String number = '',
     Map<String, dynamic> source = const {},
+    int branchId = 0,
   });
 
   void rememberQuotationCustomer({

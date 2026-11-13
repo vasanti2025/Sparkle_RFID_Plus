@@ -48,15 +48,11 @@ class OrderRemoteDataSource {
 
   Future<List<OrderRecord>> orderPage({
     required String clientCode,
-    required int pageNumber,
-    required int pageSize,
   }) async {
+    // The order API returns the list for ClientCode alone. Extra page fields
+    // keep the request from finishing, so the list stays on the spinner.
     final raw = await _api.postRaw(AppConstants.getAllOrders, {
       'ClientCode': clientCode,
-      'PageNumber': pageNumber,
-      'PageNo': pageNumber,
-      'PageSize': pageSize,
-      'PageCount': pageSize,
     });
     final rows = await compute(parseOrderRows, raw);
     return [

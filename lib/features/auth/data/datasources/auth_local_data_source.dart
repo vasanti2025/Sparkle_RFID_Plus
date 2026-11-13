@@ -17,6 +17,12 @@ abstract class AuthLocalDataSource {
   Future<void> clearRememberedUsername();
 
   Future<String?> readRememberedUsername();
+
+  Future<void> saveRememberedPassword(String password);
+
+  Future<void> clearRememberedPassword();
+
+  Future<String?> readRememberedPassword();
 }
 
 class AuthLocalDataSourceImpl implements AuthLocalDataSource {
@@ -31,6 +37,7 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
   static const _legacyUserKey = 'auth_user';
   static const _legacyLoggedInKey = 'auth_logged_in';
   static const _usernameKey = 'remembered_username';
+  static const _passwordKey = 'remembered_password';
 
   @override
   Future<void> saveSession(UserModel user) async {
@@ -66,6 +73,7 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
   @override
   Future<void> clearRememberedUsername() async {
     await _preferences.remove(_usernameKey);
+    await clearRememberedPassword();
   }
 
   @override
@@ -73,6 +81,23 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
     final username = _preferences.getString(_usernameKey);
     if (username == null || username.isEmpty) return null;
     return username;
+  }
+
+  @override
+  Future<void> saveRememberedPassword(String password) async {
+    await _secure.write(key: _passwordKey, value: password);
+  }
+
+  @override
+  Future<void> clearRememberedPassword() async {
+    await _secure.delete(key: _passwordKey);
+  }
+
+  @override
+  Future<String?> readRememberedPassword() async {
+    final password = await _secure.read(key: _passwordKey);
+    if (password == null || password.isEmpty) return null;
+    return password;
   }
 
   Future<UserModel?> _migrateLegacySession() async {

@@ -214,6 +214,7 @@ class QuotationRepositoryImpl implements QuotationRepository {
     int id = 0,
     String number = '',
     Map<String, dynamic> source = const {},
+    int branchId = 0,
   }) {
     return _guard(
       () => _remote.saveQuotation(
@@ -225,6 +226,7 @@ class QuotationRepositoryImpl implements QuotationRepository {
         id: id,
         number: number,
         source: source,
+        branchId: branchId,
       ),
     );
   }
