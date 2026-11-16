@@ -7,9 +7,20 @@ class InventoryPiece {
     required this.milligrams,
     this.rfid,
     this.epc,
+    this.tid,
     this.netMilligrams,
     this.purity,
     this.weightKnown = true,
+    this.counter,
+    this.box,
+    this.branch,
+    this.branchType,
+    this.packet,
+    this.stockId = 0,
+    this.counterId = 0,
+    this.boxId = 0,
+    this.branchId = 0,
+    this.packetId = 0,
   });
 
   final String id;
@@ -19,11 +30,60 @@ class InventoryPiece {
   final int milligrams;
   final String? rfid;
   final String? epc;
+  final String? tid;
   final int? netMilligrams;
   final String? purity;
   final bool weightKnown;
+  final String? counter;
+  final String? box;
+  final String? branch;
+  final String? branchType;
+  final String? packet;
+  final int stockId;
+  final int counterId;
+  final int boxId;
+  final int branchId;
+  final int packetId;
 
   String get name => product ?? 'Jewellery item';
+
+  InventoryPiece copyWith({
+    String? counter,
+    String? box,
+    String? branch,
+    String? packet,
+    int? counterId,
+    int? boxId,
+    int? branchId,
+    int? packetId,
+    bool clearCounter = false,
+    bool clearBox = false,
+    bool clearPacket = false,
+  }) {
+    return InventoryPiece(
+      id: id,
+      category: category,
+      product: product,
+      design: design,
+      milligrams: milligrams,
+      rfid: rfid,
+      epc: epc,
+      tid: tid,
+      netMilligrams: netMilligrams,
+      purity: purity,
+      weightKnown: weightKnown,
+      counter: clearCounter ? null : (counter ?? this.counter),
+      box: clearBox ? null : (box ?? this.box),
+      branch: branch ?? this.branch,
+      branchType: branchType,
+      packet: clearPacket ? null : (packet ?? this.packet),
+      stockId: stockId,
+      counterId: clearCounter ? 0 : (counterId ?? this.counterId),
+      boxId: clearBox ? 0 : (boxId ?? this.boxId),
+      branchId: branchId ?? this.branchId,
+      packetId: clearPacket ? 0 : (packetId ?? this.packetId),
+    );
+  }
 }
 
 abstract final class InventoryCatalog {

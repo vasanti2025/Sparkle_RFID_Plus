@@ -1,7 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:rfid_flutter_android/rfid_flutter_android.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/rfid/rfid_service.dart';
+import '../../../../core/rfid/scan_sound.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../inventory/data/inventory_stock.dart';
 
 enum _FindStep { ask, searching, verify }
 
@@ -33,9 +39,6 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
   static const _bar = Color(0xFFDCD7CA);
   static const _barOn = Color(0xFFB08630);
   static const _barFound = Color(0xFF35724D);
-  static const _secondaryFill = Color(0xFFF2EEE4);
-  static const _secondaryInk = Color(0xFF755722);
-  static const _secondaryLine = Color(0xFFE3D7BA);
   static const _symbolFill = Color(0xFFEDE6D6);
   static const _symbolInk = Color(0xFF87652A);
   static const _fieldLine = Color(0xFFDCD8D0);
@@ -44,16 +47,24 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
   var _step = _FindStep.ask;
   var _error = '';
   var _strong = false;
+  var _arming = false;
+  var _bars = 0;
+  Timer? _pulse;
+  StreamSubscription<List<RfidTagInfo>>? _tags;
 
   @override
   void dispose() {
+    _pulse?.cancel();
+    _tags?.cancel();
+    unawaited(RfidService.instance.stopIfRunning());
+    unawaited(ScanSound.stopAll());
     _target.dispose();
     super.dispose();
   }
 
   void _close() => Navigator.of(context).pop();
 
-  void _start() {
+  Future<void> _start() async {
     final value = _target.text.trim();
     if (value.isEmpty) {
       setState(() => _error = AppStrings.chooseTargetFirst);
@@ -62,8 +73,66 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
     setState(() {
       _error = '';
       _strong = false;
+      _bars = 1;
+      _arming = true;
       _step = _FindStep.searching;
     });
+    _pulse?.cancel();
+    _pulse = Timer.periodic(const Duration(milliseconds: 140), (_) {
+      if (!mounted || !_arming) return;
+      setState(() => _bars = _bars >= 4 ? 1 : _bars + 1);
+    });
+    await InventoryStock.instance.load();
+    final blocked = await RfidService.instance.init();
+    if (!mounted) return;
+    if (blocked != null) {
+      _pulse?.cancel();
+      setState(() {
+        _arming = false;
+        _step = _FindStep.ask;
+        _error = blocked;
+      });
+      return;
+    }
+    await RfidService.instance.stopIfRunning();
+    await RfidService.instance.setInventoryMode(kEpcInventoryMode);
+    unawaited(ScanSound.prepare());
+    _tags ??= RfidService.instance.tagStream.listen(_onFindTags);
+    final error = await RfidService.instance.startInventory();
+    if (!mounted) return;
+    _pulse?.cancel();
+    setState(() => _arming = false);
+    if (error != null) {
+      unawaited(ScanSound.stopAll());
+      setState(() {
+        _step = _FindStep.ask;
+        _error = error;
+      });
+    }
+  }
+
+  void _onFindTags(List<RfidTagInfo> batch) {
+    final target = _target.text.trim().toLowerCase();
+    if (target.isEmpty) return;
+    for (final tag in batch) {
+      final id = InventoryStock.instance.match(tag.epc.isNotEmpty ? tag.epc : tag.tid);
+      final piece = id == null ? null : InventoryStock.instance.byId(id);
+      final epc = tag.epc.toLowerCase();
+      final hit = epc == target ||
+          (piece != null &&
+              (piece.id.toLowerCase() == target ||
+                  (piece.rfid ?? '').toLowerCase() == target ||
+                  (piece.epc ?? '').toLowerCase() == target));
+      if (!hit) continue;
+      unawaited(ScanSound.playForRssi(tag.rssi));
+      final bars = signalBars(tag.rssi);
+      if (!mounted) return;
+      setState(() {
+        _arming = false;
+        _bars = bars;
+        _strong = bars >= 8;
+      });
+    }
   }
 
   @override
@@ -115,7 +184,7 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _pillTag(AppStrings.workflowPreview),
+        _pillTag(AppStrings.localStock),
         Text(
           AppStrings.chooseProductOrTag,
           style: _text(size: 13, color: _muted, height: 1.65),
@@ -164,12 +233,12 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
   }
 
   Widget _searching() {
-    final active = _strong ? 10 : 5;
+    final active = _bars;
     final color = _strong ? _barFound : _barOn;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _pillTag(AppStrings.simulatedSignal),
+        _pillTag(_arming ? AppStrings.startingReader : AppStrings.listeningForTag),
         Text.rich(
           TextSpan(
             style: _text(size: 13, color: _muted, height: 1.65),
@@ -209,20 +278,18 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
           style: _text(size: 12, color: _muted),
         ),
         const SizedBox(height: 16),
-        OutlinedButton(
-          onPressed: () => setState(() => _strong = true),
-          style: OutlinedButton.styleFrom(
-            backgroundColor: _secondaryFill,
-            foregroundColor: _secondaryInk,
-            side: const BorderSide(color: _secondaryLine),
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
-            textStyle: _text(size: 15, weight: FontWeight.w600, color: _secondaryInk),
+        if (_arming)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: LinearProgressIndicator(color: Color(0xFFB08630), backgroundColor: Color(0xFFE8E0D2)),
           ),
-          child: const Text(AppStrings.simulateStronger),
-        ),
         TextButton(
-          onPressed: () => setState(() => _step = _FindStep.verify),
+          onPressed: _bars > 0
+              ? () {
+                  unawaited(ScanSound.stopAll());
+                  setState(() => _step = _FindStep.verify);
+                }
+              : null,
           style: TextButton.styleFrom(
             foregroundColor: const Color(0xFF716044),
             minimumSize: const Size.fromHeight(48),

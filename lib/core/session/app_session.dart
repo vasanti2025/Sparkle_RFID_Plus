@@ -6,20 +6,23 @@ class AppSession {
   static String userId = '';
   static String token = '';
   static int branchId = 0;
-  static String branchName = '';
+  static int branchNo = 0;
+  static int employeeId = 0;
 
   static void apply({
     required String clientCode,
     required String userId,
     required String token,
-    int branchId = 0,
-    String branchName = '',
+    int? branchId,
+    int? branchNo,
+    int? employeeId,
   }) {
     AppSession.clientCode = clientCode.trim();
     AppSession.userId = userId.trim();
     AppSession.token = token.trim();
-    AppSession.branchId = branchId;
-    AppSession.branchName = branchName.trim();
+    if (branchId != null) AppSession.branchId = branchId;
+    if (branchNo != null) AppSession.branchNo = branchNo;
+    if (employeeId != null) AppSession.employeeId = employeeId;
   }
 
   static void clear() {
@@ -27,6 +30,7 @@ class AppSession {
     userId = '';
     token = '';
     branchId = 0;
-    branchName = '';
+    branchNo = 0;
+    employeeId = 0;
   }
 }

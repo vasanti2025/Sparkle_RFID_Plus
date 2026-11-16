@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
@@ -12,6 +13,7 @@ import '../../../orders/presentation/orders_entry.dart';
 import '../../../products/presentation/pages/products_page.dart';
 import '../../../tools/presentation/workspace_flow.dart';
 import '../../../transfers/presentation/pages/transfer_page.dart';
+import '../../../samples/presentation/pages/sample_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -222,10 +224,11 @@ class _ReaderStatus extends StatelessWidget {
           ),
         ),
         const Spacer(),
-        Text(
-          AppStrings.demoWorkspace,
-          style: _text(size: AppTypography.label, color: AppColors.muted),
-        ),
+        if (AppSession.clientCode.isNotEmpty)
+          Text(
+            AppSession.clientCode,
+            style: _text(size: AppTypography.label, color: AppColors.muted),
+          ),
       ],
     );
   }
@@ -501,7 +504,9 @@ class _MoveActions extends StatelessWidget {
             label: AppStrings.sampleIn,
             background: AppColors.chipSurface,
             foreground: AppColors.charcoal,
-            onTap: () => showModulePreview(context, AppStrings.sampleIn),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SamplePage(incoming: true)),
+            ),
           ),
         ),
         const SizedBox(width: 10),
@@ -510,7 +515,9 @@ class _MoveActions extends StatelessWidget {
             label: AppStrings.sampleOut,
             background: AppColors.chipSurface,
             foreground: AppColors.charcoal,
-            onTap: () => showModulePreview(context, AppStrings.sampleOut),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const SamplePage(incoming: false)),
+            ),
           ),
         ),
         const SizedBox(width: 10),

@@ -60,6 +60,24 @@ class UserModel extends User {
     );
   }
 
+  int get staffId => _employeeNumber('EmployeeId');
+
+  int get branchNumber => _employeeNumber('BranchNo');
+
+  int _employeeNumber(String key) {
+    if (sessionJson.isEmpty) return 0;
+    try {
+      final decoded = jsonDecode(sessionJson);
+      final employee = decoded is Map ? decoded['Employee'] : null;
+      if (employee is! Map) return 0;
+      final value = employee[key];
+      if (value is num) return value.toInt();
+      return int.tryParse('$value') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   factory UserModel.fromJson(Map<String, dynamic> json) {
     return UserModel(
       id: _text(json['id']),
