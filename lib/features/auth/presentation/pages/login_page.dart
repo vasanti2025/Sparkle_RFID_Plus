@@ -7,11 +7,13 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/rfid/scan_permissions.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/utils/result.dart';
 import '../../../home/presentation/pages/home_page.dart';
+import '../../data/models/user_model.dart';
 import '../../domain/usecases/login.dart';
 
 class LoginPage extends StatefulWidget {
@@ -34,6 +36,9 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _restoreUsername();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ScanPermissions.request());
+    });
   }
 
   Future<void> _restoreUsername() async {
@@ -95,10 +100,14 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     switch (result) {
       case Success(:final data):
+        final staff = data is UserModel ? data : null;
         AppSession.apply(
           clientCode: data.clientCode,
           userId: data.id,
           token: data.token,
+          branchId: data.branchId,
+          branchNo: staff?.branchNumber,
+          employeeId: staff?.staffId,
         );
         final notice = data.notice;
         if (notice != null && notice.isNotEmpty) {

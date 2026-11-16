@@ -3,10 +3,17 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:rfid_flutter_android/rfid_flutter_android.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/error/exceptions.dart';
+import '../../../../core/network/api_client.dart';
 import '../../../../core/rfid/rfid_service.dart';
+import '../../../../core/rfid/scan_sound.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../data/inventory_stock.dart';
@@ -44,6 +51,7 @@ class _InventoryPageState extends State<InventoryPage> {
   String _searchQuery = '';
   int _limit = 20;
   bool _saved = false;
+  bool _saving = false;
   String _note = '';
   bool _acknowledged = false;
   String? _ackError;
@@ -77,6 +85,7 @@ class _InventoryPageState extends State<InventoryPage> {
     _timer?.cancel();
     _tags?.cancel();
     unawaited(RfidService.instance.stopIfRunning());
+    unawaited(ScanSound.stopAll());
     _noteController.dispose();
     _listQuery.dispose();
     _findQuery.dispose();
@@ -115,6 +124,7 @@ class _InventoryPageState extends State<InventoryPage> {
     }
     _searching = false;
     _multiSearching = false;
+    unawaited(ScanSound.stopAll());
   }
 
   Future<void> _loadStock() async {
@@ -191,13 +201,24 @@ class _InventoryPageState extends State<InventoryPage> {
     for (final tag in batch) {
       final id = InventoryStock.instance.match(tag.epc.isNotEmpty ? tag.epc : tag.tid);
       final bars = signalBars(tag.rssi);
+      final target = _searching ? _piece(_searchId) : null;
+      if (target != null && _hears(target, tag.epc, tag.tid)) {
+        if (bars > _signal) {
+          _signal = bars;
+          changed = true;
+        }
+        unawaited(ScanSound.playForRssi(tag.rssi));
+      }
       if (id != null && expectedIds.contains(id)) {
+        if (_multiSearching) unawaited(ScanSound.playForRssi(tag.rssi));
         if (_status == 'scanning' && !_searching && _reads.add(id)) {
           changed = true;
           stillOpen -= 1;
+          if (!_multiSearching) unawaited(ScanSound.beep());
           if (stillOpen <= 0) {
             _status = 'paused';
             unawaited(RfidService.instance.stopInventory());
+            unawaited(ScanSound.stopAll());
             _toast(AppStrings.allItemsMatchedScanStopped);
           }
         }
@@ -237,14 +258,16 @@ class _InventoryPageState extends State<InventoryPage> {
   Future<void> _startScan() async {
     if (_status == 'arming') return;
     if (_loadingStock) {
+      _stopSearchFlags();
       _toast(AppStrings.pleaseWaitItemsLoading);
       return;
     }
-    if (_expected.isEmpty) {
+    if (_expected.isEmpty && !_searching) {
+      _stopSearchFlags();
       _toast(AppStrings.noItemsInCurrentScope);
       return;
     }
-    if (!_searching && _unmatched.isEmpty) {
+    if (!_searching && !_multiSearching && _unmatched.isEmpty && _expected.isNotEmpty) {
       _toast(AppStrings.allItemsMatchedScanStopped);
       return;
     }
@@ -275,15 +298,28 @@ class _InventoryPageState extends State<InventoryPage> {
       return;
     }
     setState(() => _status = 'scanning');
+    unawaited(_beginScanSound());
+  }
+
+  Future<void> _beginScanSound() async {
+    if (_searching || _multiSearching) {
+      await ScanSound.prepare();
+    } else {
+      await ScanSound.startInventory();
+    }
+    if (!mounted || _status != 'scanning') await ScanSound.stopAll();
   }
 
   void _reset() {
     _timer?.cancel();
+    unawaited(RfidService.instance.stopIfRunning());
+    unawaited(ScanSound.stopAll());
     setState(() {
       _reads.clear();
       _unlabelled.clear();
       _status = 'ready';
       _saved = false;
+      _saving = false;
       _note = '';
       _noteController.clear();
       _acknowledged = false;
@@ -296,18 +332,105 @@ class _InventoryPageState extends State<InventoryPage> {
     });
   }
 
-  void _confirmSave() {
+  bool get _hasScanResult => _reads.isNotEmpty || _unlabelled.isNotEmpty;
+
+  void _stopSearchFlags() {
+    if (!_searching && !_multiSearching) return;
+    setState(() {
+      _searching = false;
+      _multiSearching = false;
+    });
+  }
+
+  bool _hears(InventoryPiece item, String epc, String tid) {
+    final heard = <String>{
+      if (epc.trim().isNotEmpty) epc.trim().toUpperCase(),
+      if (tid.trim().isNotEmpty) tid.trim().toUpperCase(),
+    };
+    final keys = <String>{
+      item.id.toUpperCase(),
+      if (item.rfid != null && item.rfid!.isNotEmpty) item.rfid!.trim().toUpperCase(),
+      if (item.epc != null && item.epc!.isNotEmpty) item.epc!.trim().toUpperCase(),
+      if (item.tid != null && item.tid!.isNotEmpty) item.tid!.trim().toUpperCase(),
+    };
+    if (heard.any(keys.contains)) return true;
+    final matched = InventoryStock.instance.match(epc.isNotEmpty ? epc : tid);
+    return matched == item.id;
+  }
+
+  void _openSave() {
+    if (!_hasScanResult) {
+      _toast(AppStrings.nothingToSave);
+      return;
+    }
+    _open(_InvPage.save);
+  }
+
+  Future<void> _confirmSave() async {
+    if (_saving) return;
     if (!_acknowledged) {
       setState(() => _ackError = AppStrings.ackRequired);
       return;
     }
-    setState(() {
-      _note = _noteController.text.trim();
-      _saved = true;
-      _status = 'paused';
-      _page = _InvPage.saved;
-      _ackError = null;
-    });
+    if (!_hasScanResult) {
+      _toast(AppStrings.nothingToSave);
+      return;
+    }
+    final clientCode = AppSession.clientCode;
+    if (clientCode.isEmpty) {
+      _toast(AppStrings.signInToSave);
+      return;
+    }
+    setState(() => _saving = true);
+    unawaited(RfidService.instance.stopIfRunning());
+    try {
+      final items = [
+        for (final item in _expected)
+          {
+            'ItemCode': item.id,
+            'Status': _reads.contains(item.id) ? 'match' : 'unmatch',
+            'GrossWeight': item.milligrams / 1000,
+            'NetWeight': (item.netMilligrams ?? 0) / 1000,
+            'Quantity': 1,
+            'CounterName': item.counter ?? '',
+            'CategoryName': item.category ?? '',
+            'ProductName': item.product ?? '',
+            'DesignName': item.design ?? '',
+            'PurityName': item.purity ?? '',
+            'BranchName': item.branch ?? _scope,
+          },
+      ];
+      const batch = 400;
+      for (var start = 0; start < items.length; start += batch) {
+        final end = math.min(start + batch, items.length);
+        await ApiClient().post(
+          AppConstants.addStockVerification,
+          {
+            'ClientCode': clientCode,
+            'Items': items.sublist(start, end),
+          },
+          timeout: const Duration(minutes: 2),
+        );
+        if (!mounted) return;
+      }
+      setState(() {
+        _saving = false;
+        _note = _noteController.text.trim();
+        _saved = true;
+        _status = 'paused';
+        _page = _InvPage.saved;
+        _ackError = null;
+      });
+      _toast(AppStrings.reportUploaded);
+    } on ServerException catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast(error.message);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast('$error');
+    }
   }
 
   void _toast(String message) {
@@ -442,7 +565,7 @@ class _InventoryPageState extends State<InventoryPage> {
           ),
           if (_page != _InvPage.scopes)
             IconButton(
-              onPressed: _matched.isEmpty ? null : _askReset,
+              onPressed: _askReset,
               icon: const Icon(Icons.more_horiz, size: 22),
               color: AppColors.charcoal,
             ),
@@ -562,7 +685,7 @@ class _InventoryPageState extends State<InventoryPage> {
   Widget _setup() {
     final expected = _expected;
     final scanning = _status == 'scanning' || _status == 'arming';
-    final hasReads = _matched.isNotEmpty;
+    final hasReads = _reads.isNotEmpty || _unlabelled.isNotEmpty;
     final label = scanning
         ? AppStrings.pauseScan
         : hasReads
@@ -694,9 +817,9 @@ class _InventoryPageState extends State<InventoryPage> {
           onPrimary: scanning ? () => setState(_pauseScan) : _startScan,
           tools: [
             _tool(Icons.filter_list, AppStrings.results, () => _openList('matched')),
-            _tool(Icons.save_outlined, AppStrings.save, () => _open(_InvPage.save), enabled: hasReads),
-            _tool(Icons.mail_outline, AppStrings.email, _emailPreview, enabled: hasReads),
-            _tool(Icons.replay, AppStrings.reset, _askReset, enabled: hasReads, danger: true),
+            _tool(Icons.save_outlined, AppStrings.save, _openSave),
+            _tool(Icons.mail_outline, AppStrings.email, _emailReport),
+            _tool(Icons.replay, AppStrings.reset, _askReset, danger: true),
           ],
         ),
       ],
@@ -865,6 +988,16 @@ class _InventoryPageState extends State<InventoryPage> {
                       ),
                   ],
                 ),
+        ),
+        _footer(
+          primary: AppStrings.backToScan,
+          icon: Icons.arrow_back,
+          onPrimary: () => _open(_InvPage.setup),
+          tools: [
+            _tool(Icons.save_outlined, AppStrings.save, _openSave),
+            _tool(Icons.mail_outline, AppStrings.email, _emailReport),
+            _tool(Icons.replay, AppStrings.reset, _askReset, danger: true),
+          ],
         ),
       ],
     );
@@ -1110,7 +1243,7 @@ class _InventoryPageState extends State<InventoryPage> {
             unawaited(_startScan());
           },
           secondary: AppStrings.locatedItem,
-          onSecondary: _signal >= 8
+          onSecondary: _signal > 0
               ? () {
                   setState(() {
                     _reads.add(item.id);
@@ -1192,23 +1325,28 @@ class _InventoryPageState extends State<InventoryPage> {
                     style: _text(size: 11, weight: FontWeight.w700, letterSpacing: 0.6),
                   ),
                   const Spacer(),
-                  if (item.epc != null)
+                  if (item.epc != null || item.rfid != null)
                     IconButton(
                       tooltip: AppStrings.copied,
-                      onPressed: () => _copyEpc(item.epc!),
+                      onPressed: () => _copyEpc(item.epc ?? item.rfid!),
                       icon: const Icon(Icons.copy, size: 18),
                     ),
                 ],
               ),
               Text(
-                item.epc ?? AppStrings.notProvided,
+                item.epc ?? item.rfid ?? AppStrings.notProvided,
                 style: _text(size: 13, weight: FontWeight.w600),
               ),
               const SizedBox(height: 12),
               Text(
-                item.id == 'SM007'
-                    ? AppStrings.suppliedItemNote
-                    : AppStrings.demoItemNote,
+                () {
+                  final place = [
+                    if ((item.counter ?? '').isNotEmpty) item.counter!,
+                    if ((item.box ?? '').isNotEmpty) item.box!,
+                    if ((item.branch ?? '').isNotEmpty) item.branch!,
+                  ].join(' · ');
+                  return place.isEmpty ? AppStrings.verifyPhysical : place;
+                }(),
                 style: _text(size: 13, color: AppColors.muted, height: 1.35),
               ),
             ],
@@ -1314,8 +1452,13 @@ class _InventoryPageState extends State<InventoryPage> {
           ),
         ),
         _footer(
-          primary: outstanding ? AppStrings.saveWithExceptions : AppStrings.saveReport,
+          primary: _saving
+              ? AppStrings.pleaseWaitItemsLoading
+              : outstanding
+              ? AppStrings.saveWithExceptions
+              : AppStrings.saveReport,
           icon: Icons.save_outlined,
+          enabled: !_saving,
           onPrimary: _confirmSave,
           note: AppStrings.demoSaveNote,
         ),
@@ -1687,27 +1830,80 @@ class _InventoryPageState extends State<InventoryPage> {
     }
   }
 
-  void _emailPreview() {
-    showModalBottomSheet<void>(
+  Future<void> _emailReport() async {
+    if (!_hasScanResult) {
+      _toast(AppStrings.nothingToEmail);
+      return;
+    }
+    final address = TextEditingController();
+    final send = await showDialog<bool>(
       context: context,
-      backgroundColor: _surface,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(AppStrings.emailPreview, style: _text(size: 18, weight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Text(AppStrings.emailPreviewBody, style: _text(size: 14, color: AppColors.muted)),
-            const SizedBox(height: 12),
-            _summaryLine(AppStrings.scopeLabel, _scope),
-            _summaryLine(AppStrings.matched, '${_matched.length}'),
-            _summaryLine(AppStrings.notYetRead, '${_unmatched.length}'),
-          ],
+      builder: (context) => AlertDialog(
+        title: const Text(AppStrings.email),
+        content: TextField(
+          controller: address,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(hintText: AppStrings.enterEmailAddress),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(AppStrings.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(AppStrings.email),
+          ),
+        ],
       ),
     );
+    final email = address.text.trim();
+    address.dispose();
+    if (send != true || !mounted) return;
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      _toast(AppStrings.invalidEmailAddress);
+      return;
+    }
+    try {
+      final bytes = await _reportPdf(email);
+      await Printing.sharePdf(bytes: bytes, filename: 'inventory-report.pdf');
+      if (!mounted) return;
+      _toast(AppStrings.reportReadyToEmail);
+    } catch (error) {
+      if (!mounted) return;
+      _toast('$error');
+    }
+  }
+
+  Future<Uint8List> _reportPdf(String email) async {
+    final document = pw.Document();
+    pw.Widget line(String label, String value) => pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 4),
+      child: pw.Text('$label: $value'),
+    );
+    document.addPage(
+      pw.MultiPage(
+        build: (context) => [
+          pw.Text('Inventory report', style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          line('To', email),
+          line(AppStrings.scopeLabel, '$_mode · $_scope'),
+          line(AppStrings.matched, '${_matched.length}'),
+          line(AppStrings.notYetRead, '${_unmatched.length}'),
+          line(AppStrings.unlabelled, '${_unlabelled.length}'),
+          if (_noteController.text.trim().isNotEmpty) line(AppStrings.reviewNote, _noteController.text.trim()),
+          pw.SizedBox(height: 12),
+          pw.Text('Matched', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          for (final item in _matched.take(200))
+            pw.Text('${item.id}  ${item.rfid ?? ''}  ${item.product ?? ''}'),
+          pw.SizedBox(height: 8),
+          pw.Text('Not yet read', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          for (final item in _unmatched.take(200))
+            pw.Text('${item.id}  ${item.rfid ?? ''}  ${item.product ?? ''}'),
+        ],
+      ),
+    );
+    return document.save();
   }
 
   Widget _summaryStat(String label, String value) {

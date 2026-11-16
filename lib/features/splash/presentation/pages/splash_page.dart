@@ -10,9 +10,11 @@ import '../../../../core/di/injection.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
+import '../../../auth/data/models/user_model.dart';
 import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/pages/login_page.dart';
 import '../../../home/presentation/pages/home_page.dart';
+import '../../../../core/rfid/scan_permissions.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -44,8 +46,13 @@ class _SplashPageState extends State<SplashPage> {
           clientCode: user.clientCode,
           userId: user.id,
           token: user.token,
+          branchId: user.branchId,
+          branchNo: user is UserModel ? user.branchNumber : null,
+          employeeId: user is UserModel ? user.staffId : null,
         );
         unawaited(Injection.productSync.start(user));
+        await ScanPermissions.request();
+        if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute<void>(builder: (_) => const HomePage()),
         );

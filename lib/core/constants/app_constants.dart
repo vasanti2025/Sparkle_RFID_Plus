@@ -33,6 +33,19 @@ abstract final class AppConstants {
   //static const apiBaseUrl = 'https://rrgold.loyalstring.co.in/';
   static const loginPath = '/api/ClientOnboarding/ClientOnboardingLogin';
   static const rfidSyncPath = '/api/ProductMaster/GetAllRFID';
+  static const addStockVerification =
+      '/api/ProductMaster/AddStockVerificationBySession';
+  static const stockTransferTypes = '/api/ProductMaster/GetStockTransferTypes';
+  static const addStockTransfer = '/api/ProductMaster/AddStockTransfer';
+  static const allStockTransfers = '/api/ProductMaster/GetAllStockTransfers';
+  static const cancelStockTransfer =
+      '/api/ProductMaster/CancelStockTransferMasterDetails';
+  static const approveStockTransfer = '/api/ProductMaster/ApproveStockTransfer';
+  static const allSampleOut = '/api/Transaction/GetAllCustomerIssue';
+  static const lastSampleOutNo = '/api/Transaction/GetCustLastSampleOutNo';
+  static const addSampleOut = '/api/Transaction/AddCustomerIssue';
+  static const updateSampleOut = '/api/Transaction/UpdateCustomerIssue';
+  static const allSampleIn = '/api/Transaction/GetAllIssueItemDetails';
   static const productSyncPath =
       '/api/ProductMaster/branch-labelled-stocks/search';
 }

@@ -5,6 +5,7 @@ import 'package:rfid_flutter_android/rfid_flutter_android.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/rfid/rfid_service.dart';
+import '../../../../core/rfid/scan_sound.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../inventory/data/inventory_stock.dart';
 
@@ -56,6 +57,7 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
     _pulse?.cancel();
     _tags?.cancel();
     unawaited(RfidService.instance.stopIfRunning());
+    unawaited(ScanSound.stopAll());
     _target.dispose();
     super.dispose();
   }
@@ -94,12 +96,14 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
     }
     await RfidService.instance.stopIfRunning();
     await RfidService.instance.setInventoryMode(kEpcInventoryMode);
+    unawaited(ScanSound.prepare());
     _tags ??= RfidService.instance.tagStream.listen(_onFindTags);
     final error = await RfidService.instance.startInventory();
     if (!mounted) return;
     _pulse?.cancel();
     setState(() => _arming = false);
     if (error != null) {
+      unawaited(ScanSound.stopAll());
       setState(() {
         _step = _FindStep.ask;
         _error = error;
@@ -120,6 +124,7 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
                   (piece.rfid ?? '').toLowerCase() == target ||
                   (piece.epc ?? '').toLowerCase() == target));
       if (!hit) continue;
+      unawaited(ScanSound.playForRssi(tag.rssi));
       final bars = signalBars(tag.rssi);
       if (!mounted) return;
       setState(() {
@@ -279,7 +284,12 @@ class _FindJewellerySheetState extends State<_FindJewellerySheet> {
             child: LinearProgressIndicator(color: Color(0xFFB08630), backgroundColor: Color(0xFFE8E0D2)),
           ),
         TextButton(
-          onPressed: _strong ? () => setState(() => _step = _FindStep.verify) : null,
+          onPressed: _bars > 0
+              ? () {
+                  unawaited(ScanSound.stopAll());
+                  setState(() => _step = _FindStep.verify);
+                }
+              : null,
           style: TextButton.styleFrom(
             foregroundColor: const Color(0xFF716044),
             minimumSize: const Size.fromHeight(48),

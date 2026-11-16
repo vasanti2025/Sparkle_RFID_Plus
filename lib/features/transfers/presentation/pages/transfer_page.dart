@@ -2,10 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:rfid_flutter_android/rfid_flutter_android.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/rfid/rfid_service.dart';
+import '../../../../core/rfid/scan_sound.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../demo/transfer_demo_session.dart';
+import '../../../inventory/data/inventory_stock.dart';
+import '../../../inventory/domain/inventory_catalog.dart';
+import '../../data/stock_transfer.dart';
 
 class TransferPage extends StatefulWidget {
   const TransferPage({super.key});
@@ -22,28 +27,87 @@ class _TransferPageState extends State<TransferPage> {
   static const _gold = Color(0xFF85652C);
   static const _note = Color(0xFF817866);
 
-  final _session = TransferDemoSession.instance;
+  final _api = StockTransferApi();
   final _query = TextEditingController();
+  final _selected = <String>{};
+  var _loading = true;
+  var _sending = false;
   var _capturing = false;
-  var _suspend = false;
-  Timer? _timer;
+  var _single = false;
+  var _onlySelected = false;
+  var _shown = 60;
+  List<TransferTypeOption> _types = const [];
+  TransferTypeOption? _type;
+  String _from = '';
+  String _to = '';
+  StreamSubscription<List<RfidTagInfo>>? _tags;
+  Timer? _singleTimer;
 
   @override
   void initState() {
     super.initState();
-    _query.text = _session.query;
     _query.addListener(() {
-      _session.query = _query.text;
-      if (mounted && !_suspend) setState(() {});
+      if (mounted) setState(() => _shown = 60);
     });
+    unawaited(_load());
   }
 
   @override
   void dispose() {
-    _suspend = true;
-    _stopScan();
+    _singleTimer?.cancel();
+    _tags?.cancel();
+    unawaited(RfidService.instance.stopIfRunning());
+    unawaited(ScanSound.stopAll());
     _query.dispose();
     super.dispose();
+  }
+
+  Future<void> _load() async {
+    await InventoryStock.instance.load();
+    try {
+      _types = await _api.types();
+    } catch (_) {
+      _types = const [];
+    }
+    if (!mounted) return;
+    setState(() => _loading = false);
+  }
+
+  (String, String)? get _ends => _type?.ends;
+
+  List<InventoryPiece> get _atSource {
+    final ends = _ends;
+    if (ends == null || _from.isEmpty) return InventoryStock.instance.pieces;
+    return InventoryStock.instance.pieces.where((item) {
+      return (_place(item, ends.$1) ?? '').toLowerCase() == _from.toLowerCase();
+    }).toList();
+  }
+
+  List<InventoryPiece> get _matched {
+    final query = _query.text.trim().toLowerCase();
+    final pool = _onlySelected
+        ? InventoryStock.instance.pieces.where((item) => _selected.contains(item.id)).toList()
+        : _atSource;
+    if (query.isEmpty) return pool;
+    return pool.where((item) {
+      return item.id.toLowerCase().contains(query) ||
+          item.name.toLowerCase().contains(query) ||
+          (item.rfid ?? '').toLowerCase().contains(query);
+    }).toList();
+  }
+
+  List<InventoryPiece> get _chosen {
+    return InventoryStock.instance.pieces.where((item) => _selected.contains(item.id)).toList();
+  }
+
+  String? _place(InventoryPiece item, String kind) {
+    return switch (kind) {
+      'counter' => item.counter,
+      'box' => item.box,
+      'packet' => item.packet,
+      'branch' => item.branch,
+      _ => null,
+    };
   }
 
   void _toast(String message) {
@@ -52,34 +116,86 @@ class _TransferPageState extends State<TransferPage> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _stopScan() {
-    _timer?.cancel();
-    _timer = null;
+  Future<void> _stopScan() async {
+    _singleTimer?.cancel();
     _capturing = false;
+    _single = false;
+    await RfidService.instance.stopIfRunning();
+    await ScanSound.stopAll();
   }
 
-  void _toggleScan() {
+  Future<void> _toggleScan({required bool single}) async {
     if (_capturing) {
-      setState(_stopScan);
+      await _stopScan();
+      if (mounted) setState(() {});
       return;
     }
-    setState(() => _capturing = true);
-    _timer = Timer.periodic(const Duration(milliseconds: 900), (_) {
-      if (!mounted) return;
-      final next = _session.nextUnread();
-      if (next == null) {
-        setState(_stopScan);
-        _toast(AppStrings.allPiecesRead);
-        return;
-      }
-      setState(() => _session.toggle(next.id, true));
+    if (_loading) {
+      _toast(AppStrings.pleaseWaitItemsLoading);
+      return;
+    }
+    if (_atSource.isEmpty) {
+      _toast(AppStrings.noPiecesHere);
+      return;
+    }
+    setState(() {
+      _capturing = true;
+      _single = single;
     });
+    _tags ??= RfidService.instance.tagStream.listen(_onTags);
+    final blocked = await RfidService.instance.init();
+    if (!mounted) return;
+    if (blocked != null) {
+      setState(() {
+        _capturing = false;
+        _single = false;
+      });
+      _toast(blocked);
+      return;
+    }
+    await RfidService.instance.stopIfRunning();
+    await RfidService.instance.setInventoryMode(kEpcInventoryMode);
+    final error = await RfidService.instance.startInventory();
+    if (!mounted) return;
+    if (error != null) {
+      setState(() {
+        _capturing = false;
+        _single = false;
+      });
+      _toast(error);
+      return;
+    }
+    if (single) {
+      _singleTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted && _single) {
+          unawaited(_stopScan().then((_) {
+            if (mounted) setState(() {});
+          }));
+        }
+      });
+    } else {
+      unawaited(ScanSound.startInventory());
+    }
+  }
+
+  void _onTags(List<RfidTagInfo> batch) {
+    if (!_capturing) return;
+    final allowed = _atSource.map((item) => item.id).toSet();
+    var added = false;
+    for (final tag in batch) {
+      final id = InventoryStock.instance.match(tag.epc.isNotEmpty ? tag.epc : tag.tid);
+      if (id == null || !allowed.contains(id) || !_selected.add(id)) continue;
+      added = true;
+      unawaited(ScanSound.beep());
+      if (_single) {
+        unawaited(_stopScan());
+        break;
+      }
+    }
+    if (added && mounted) setState(() {});
   }
 
   void _present(String title, Widget body) {
-    final wasScanning = _capturing;
-    _stopScan();
-    if (wasScanning && mounted) setState(() {});
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -90,12 +206,7 @@ class _TransferPageState extends State<TransferPage> {
       ),
       builder: (context) {
         return Padding(
-          padding: EdgeInsets.fromLTRB(
-            22,
-            0,
-            22,
-            20 + MediaQuery.viewInsetsOf(context).bottom,
-          ),
+          padding: EdgeInsets.fromLTRB(22, 0, 22, 20 + MediaQuery.viewInsetsOf(context).bottom),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -114,14 +225,7 @@ class _TransferPageState extends State<TransferPage> {
                 Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        title,
-                        style: _text(
-                          size: 20,
-                          weight: FontWeight.w600,
-                          letterSpacing: -0.6,
-                        ),
-                      ),
+                      child: Text(title, style: _text(size: 20, weight: FontWeight.w600, letterSpacing: -0.6)),
                     ),
                     IconButton(
                       onPressed: () => Navigator.pop(context),
@@ -143,64 +247,21 @@ class _TransferPageState extends State<TransferPage> {
       AppStrings.transferOptions,
       Column(
         children: [
-          _menuRow(AppStrings.gscan, Icons.crop_free, _gscan),
-          _menuRow(AppStrings.transferList, Icons.list_alt, _transferList),
+          _menuRow(AppStrings.scanOne, Icons.center_focus_strong, () {
+            Navigator.pop(context);
+            unawaited(_toggleScan(single: true));
+          }),
+          _menuRow(AppStrings.gscan, Icons.crop_free, () {
+            Navigator.pop(context);
+            unawaited(_toggleScan(single: false));
+          }),
+          _menuRow(AppStrings.transferList, Icons.list_alt, () {
+            Navigator.pop(context);
+            _openList();
+          }),
           _menuRow(AppStrings.clearSelectedPieces, Icons.restart_alt, _clear),
         ],
       ),
-    );
-  }
-
-  void _gscan() {
-    Navigator.pop(context);
-    _present(
-      AppStrings.gscan,
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(AppStrings.gscanStays, style: _text(size: 13, color: _muted, height: 1.5)),
-          const SizedBox(height: 8),
-          Text(AppStrings.gscanNotShown, style: _text(size: 12, color: _note, height: 1.45)),
-          const SizedBox(height: 14),
-          _filled(AppStrings.backToWorkspace, () => Navigator.pop(context)),
-        ],
-      ),
-    );
-  }
-
-  void _transferList() {
-    Navigator.pop(context);
-    final records = _session.transfers;
-    _present(
-      AppStrings.transferList,
-      records.isEmpty
-          ? _empty(AppStrings.noDemoTransfers, AppStrings.confirmedTransfersHere)
-          : Column(
-              children: [
-                for (final record in records)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE3DDD1)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(record.id, style: _text(size: 14, weight: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${record.from} → ${record.to}\n${record.ids.length} ${AppStrings.pieces} · ${AppStrings.grossWeight} ${TransferDemoSession.grams(record.gross)} g',
-                          style: _text(size: 12, color: _muted, height: 1.4),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
     );
   }
 
@@ -219,7 +280,7 @@ class _TransferPageState extends State<TransferPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: _filled(AppStrings.clearPieces, () {
-                  _session.selected.clear();
+                  _selected.clear();
                   Navigator.pop(context);
                   setState(() {});
                 }),
@@ -231,38 +292,56 @@ class _TransferPageState extends State<TransferPage> {
     );
   }
 
+  void _openList() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _surface,
+      barrierColor: const Color(0x70151410),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(23)),
+      ),
+      builder: (context) => _TransferList(api: _api, types: _types),
+    );
+  }
+
   void _route() {
+    if (_types.isEmpty) {
+      _toast(AppStrings.noTransferTypes);
+      return;
+    }
     _present(
       AppStrings.chooseTransferRoute,
       _RouteForm(
-        route: _session.route,
-        from: _session.from,
-        to: _session.to,
-        onApply: (route, from, to) {
+        types: _types,
+        type: _type,
+        from: _from,
+        to: _to,
+        onApply: (type, from, to) {
           Navigator.pop(context);
-          final current = _session.kinds;
-          final next = TransferDemoSession.routes[route];
-          final sourceChanged = current.$1 != next.$1 || _session.from != from;
-          if (sourceChanged && _session.selected.isNotEmpty) {
-            _confirmSource(route, from, to);
+          final sourceChanged = _type?.id != type.id || _from != from;
+          if (sourceChanged && _selected.isNotEmpty) {
+            _confirmSource(type, from, to);
             return;
           }
-          setState(() => _session.applyRoute(route, from, to));
+          setState(() {
+            _type = type;
+            _from = from;
+            _to = to;
+            _shown = 60;
+          });
         },
       ),
     );
   }
 
-  void _confirmSource(int route, String from, String to) {
+  void _confirmSource(TransferTypeOption type, String from, String to) {
     _present(
       AppStrings.changeTheSource,
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            AppStrings.sourceChangeWarning(_session.selected.length),
-            style: _text(size: 13, color: _muted, height: 1.5),
-          ),
+          Text(AppStrings.sourceChangeWarning(_selected.length), style: _text(size: 13, color: _muted, height: 1.5)),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -271,7 +350,12 @@ class _TransferPageState extends State<TransferPage> {
               Expanded(
                 child: _filled(AppStrings.changeSource, () {
                   Navigator.pop(context);
-                  setState(() => _session.applyRoute(route, from, to));
+                  setState(() {
+                    _selected.clear();
+                    _type = type;
+                    _from = from;
+                    _to = to;
+                  });
                 }),
               ),
             ],
@@ -282,62 +366,141 @@ class _TransferPageState extends State<TransferPage> {
   }
 
   void _selectVisible() {
-    final rows = _session.shown();
+    final rows = _matched.take(_shown).toList();
     if (rows.isEmpty) return;
-    final all = rows.every((piece) => _session.selected.contains(piece.id));
+    final all = rows.every((piece) => _selected.contains(piece.id));
     setState(() {
       for (final piece in rows) {
-        _session.toggle(piece.id, !all);
+        if (all) {
+          _selected.remove(piece.id);
+        } else {
+          _selected.add(piece.id);
+        }
       }
     });
   }
 
-  void _review() {
-    final messages = _session.errors();
-    if (messages.isNotEmpty) {
-      _toast(messages.join(' '));
-      if (!messages.first.startsWith('Select')) _route();
+  Future<void> _review() async {
+    if (_type == null || _from.isEmpty || _to.isEmpty) {
+      _toast(AppStrings.validRoute);
+      _route();
       return;
     }
-    final items = _session.chosen();
-    final totals = TransferDemoSession.weightOf(items);
+    final ends = _ends;
+    if (ends != null && ends.$1 == ends.$2 && _from.toLowerCase() == _to.toLowerCase()) {
+      _toast(AppStrings.sourceDestDifferent);
+      return;
+    }
+    final items = _chosen;
+    if (items.isEmpty) {
+      _toast(AppStrings.selectOnePiece);
+      return;
+    }
+    if (items.every((item) => item.stockId <= 0)) {
+      _toast(AppStrings.missingStockId);
+      return;
+    }
+    final branchMove = _type!.id == 15 || (ends?.$1 == 'branch' && ends?.$2 == 'branch');
+    var people = const <TransferEmployee>[];
+    if (branchMove) {
+      try {
+        people = await _api.employees();
+      } catch (_) {
+        people = const [];
+      }
+    }
+    if (!mounted) return;
+    final gross = items.fold<int>(0, (sum, item) => sum + item.milligrams);
+    final net = items.fold<int>(0, (sum, item) => sum + (item.netMilligrams ?? 0));
+    final remarks = TextEditingController();
+    String employee = people.isEmpty ? '' : people.first.id;
     _present(
       AppStrings.reviewTransfer,
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _routeCard(editing: false),
-          _reviewRow(AppStrings.selectedPieces, '${items.length}'),
-          _reviewRow(
-            AppStrings.grossWeight,
-            '${TransferDemoSession.grams(totals.$1)} g',
-          ),
-          _reviewRow(
-            AppStrings.netWeight,
-            '${TransferDemoSession.grams(totals.$2)} g',
-          ),
-          const SizedBox(height: 8),
-          Text(
-            items.map((piece) => '${piece.id} · ${piece.name}').join('\n'),
-            style: _text(size: 12, height: 1.5),
-          ),
-          const SizedBox(height: 8),
-          Text(AppStrings.reviewTransferNote, style: _text(size: 12, color: _note, height: 1.4)),
-          const SizedBox(height: 14),
-          _filled(AppStrings.confirmTransfer, _confirm),
-          const SizedBox(height: 8),
-          Text(AppStrings.exampleStockOnly, style: _text(size: 12, color: _note, height: 1.4)),
-        ],
+      StatefulBuilder(
+        builder: (context, setSheet) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _routeCard(editing: false),
+              _reviewRow(AppStrings.selectedPieces, '${items.length}'),
+              _reviewRow(AppStrings.grossWeight, '${InventoryCatalog.grams(gross)} g'),
+              _reviewRow(AppStrings.netWeight, '${InventoryCatalog.grams(net)} g'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: remarks,
+                decoration: InputDecoration(
+                  labelText: AppStrings.remarks,
+                  filled: true,
+                  fillColor: AppColors.white,
+                  border: _border(const Color(0xFFD5CBBC), 10),
+                ),
+              ),
+              if (branchMove) ...[
+                const SizedBox(height: 10),
+                if (people.isEmpty)
+                  TextField(
+                    decoration: InputDecoration(
+                      labelText: AppStrings.receivingEmployee,
+                      filled: true,
+                      fillColor: AppColors.white,
+                      border: _border(const Color(0xFFD5CBBC), 10),
+                    ),
+                    onChanged: (value) => employee = value.trim(),
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    initialValue: employee,
+                    items: [
+                      for (final person in people)
+                        DropdownMenuItem(value: person.id, child: Text(person.name)),
+                    ],
+                    onChanged: (value) => setSheet(() => employee = value ?? employee),
+                    decoration: InputDecoration(
+                      labelText: AppStrings.receivingEmployee,
+                      filled: true,
+                      fillColor: AppColors.white,
+                      border: _border(const Color(0xFFD5CBBC), 10),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 8),
+              Text(AppStrings.reviewTransferNote, style: _text(size: 12, color: _note, height: 1.4)),
+              const SizedBox(height: 14),
+              _filled(AppStrings.confirmTransfer, () => _send(remarks.text, employee)),
+            ],
+          );
+        },
       ),
     );
   }
 
-  void _confirm() {
-    final record = _session.confirm();
-    if (record == null) {
-      _toast(_session.errors().join(' '));
+  Future<void> _send(String remarks, String employee) async {
+    if (_sending || _type == null) return;
+    setState(() => _sending = true);
+    String? error;
+    try {
+      error = await _api.submit(
+        type: _type!,
+        fromName: _from,
+        toName: _to,
+        pieces: _chosen,
+        remarks: remarks.trim(),
+        transferToEmployee: employee,
+      );
+    } catch (failure) {
+      if (mounted) _toast(failure.toString());
+      if (mounted) setState(() => _sending = false);
       return;
     }
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (error != null) {
+      _toast(error);
+      return;
+    }
+    final count = _selected.length;
+    final route = '$_from → $_to';
+    _selected.clear();
     Navigator.pop(context);
     setState(() {});
     _present(
@@ -349,28 +512,19 @@ class _TransferPageState extends State<TransferPage> {
             width: 62,
             height: 62,
             alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEDE6D6),
-              borderRadius: BorderRadius.circular(18),
-            ),
+            decoration: BoxDecoration(color: const Color(0xFFEDE6D6), borderRadius: BorderRadius.circular(18)),
             child: const Icon(Icons.check, color: Color(0xFF87652A)),
           ),
           const SizedBox(height: 12),
-          Text(
-            '${record.ids.length} ${AppStrings.pieces}\n${record.from} → ${record.to}',
-            style: _text(size: 14, weight: FontWeight.w600, height: 1.4),
-          ),
+          Text('$count ${AppStrings.pieces}\n$route', style: _text(size: 14, weight: FontWeight.w600, height: 1.4)),
           const SizedBox(height: 8),
-          Text(
-            '${record.id} ${AppStrings.recordedInDemo}',
-            style: _text(size: 12, color: _note, height: 1.4),
-          ),
+          Text(AppStrings.recordedInDemo, style: _text(size: 12, color: _note, height: 1.4)),
           const SizedBox(height: 14),
           _filled(AppStrings.returnToStock, () => Navigator.pop(context)),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _transferListFromSuccess();
+              _openList();
             },
             child: const Text(AppStrings.viewTransferList),
           ),
@@ -379,51 +533,17 @@ class _TransferPageState extends State<TransferPage> {
     );
   }
 
-  void _transferListFromSuccess() {
-    final records = _session.transfers;
-    _present(
-      AppStrings.transferList,
-      records.isEmpty
-          ? _empty(AppStrings.noDemoTransfers, AppStrings.confirmedTransfersHere)
-          : Column(
-              children: [
-                for (final record in records)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE3DDD1)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(record.id, style: _text(size: 14, weight: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        Text(
-                          '${record.from} → ${record.to}\n${record.ids.length} ${AppStrings.pieces} · ${AppStrings.grossWeight} ${TransferDemoSession.grams(record.gross)} g',
-                          style: _text(size: 12, color: _muted, height: 1.4),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
-    final chosen = _session.chosen();
-    final totals = TransferDemoSession.weightOf(chosen);
-    final rows = _session.shown();
-    final allVisible = rows.isNotEmpty && rows.every((piece) => _session.selected.contains(piece.id));
+    final chosen = _chosen;
+    final gross = chosen.fold<int>(0, (sum, item) => sum + item.milligrams);
+    final rows = _matched;
+    final visible = rows.take(_shown).toList();
+    final allVisible = visible.isNotEmpty && visible.every((piece) => _selected.contains(piece.id));
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) _stopScan();
+        if (didPop) unawaited(_stopScan());
       },
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         value: const SystemUiOverlayStyle(
@@ -447,15 +567,10 @@ class _TransferPageState extends State<TransferPage> {
                         children: [
                           Text(
                             AppStrings.moveStockClarity,
-                            style: _text(
-                              size: 10,
-                              weight: FontWeight.w600,
-                              color: const Color(0xFF80745B),
-                              letterSpacing: 0.5,
-                            ),
+                            style: _text(size: 10, weight: FontWeight.w600, color: const Color(0xFF80745B), letterSpacing: 0.5),
                           ),
                           const Spacer(),
-                          _tag(AppStrings.demoData),
+                          _tag(AppStrings.liveStock),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -477,37 +592,45 @@ class _TransferPageState extends State<TransferPage> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      _tabs(chosen.length),
-                      if (_capturing) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          AppStrings.selectingDemoTags,
-                          style: _text(size: 12, weight: FontWeight.w600, color: const Color(0xFF8A682B)),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(AppStrings.tickOrScan, style: _text(size: 10, color: const Color(0xFF847860))),
-                          ),
-                          TextButton(
-                            onPressed: rows.isEmpty ? null : _selectVisible,
-                            child: Text(allVisible ? AppStrings.clearVisible : AppStrings.selectVisible),
+                      _tabs(chosen.length, _atSource.length),
+                      if (_loading) ...[
+                        const SizedBox(height: 18),
+                        const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                      ] else ...[
+                        if (_capturing) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            AppStrings.listeningForPieces,
+                            style: _text(size: 12, weight: FontWeight.w600, color: const Color(0xFF8A682B)),
                           ),
                         ],
-                      ),
-                      if (rows.isEmpty)
-                        _empty(
-                          _session.onlySelected ? AppStrings.noSelectedPieces : AppStrings.noPiecesHere,
-                          _session.onlySelected ? AppStrings.switchToAllStock : AppStrings.checkSource,
-                        )
-                      else
-                        for (final piece in rows) _stockRow(piece),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(child: Text(AppStrings.tickOrScan, style: _text(size: 10, color: const Color(0xFF847860)))),
+                            TextButton(
+                              onPressed: visible.isEmpty ? null : _selectVisible,
+                              child: Text(allVisible ? AppStrings.clearVisible : AppStrings.selectVisible),
+                            ),
+                          ],
+                        ),
+                        if (visible.isEmpty)
+                          _empty(
+                            _onlySelected ? AppStrings.noSelectedPieces : AppStrings.noPiecesHere,
+                            _onlySelected ? AppStrings.switchToAllStock : AppStrings.checkSource,
+                          )
+                        else
+                          for (final piece in visible) _stockRow(piece),
+                        if (rows.length > visible.length)
+                          TextButton(
+                            onPressed: () => setState(() => _shown += 60),
+                            child: Text('${AppStrings.showMoreItems} (${rows.length - visible.length})'),
+                          ),
+                      ],
                     ],
                   ),
                 ),
-                _footer(chosen.length, totals.$1),
+                _footer(chosen.length, gross),
               ],
             ),
           ),
@@ -518,9 +641,7 @@ class _TransferPageState extends State<TransferPage> {
 
   Widget _header() {
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _headLine)),
-      ),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _headLine))),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
         child: Row(
@@ -528,7 +649,7 @@ class _TransferPageState extends State<TransferPage> {
             IconButton(
               tooltip: AppStrings.home,
               onPressed: () {
-                _stopScan();
+                unawaited(_stopScan());
                 Navigator.of(context).maybePop();
               },
               icon: const Icon(Icons.arrow_back, size: 21, color: _ink),
@@ -537,10 +658,7 @@ class _TransferPageState extends State<TransferPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    AppStrings.stockTransfer,
-                    style: _text(size: 21, weight: FontWeight.w600, letterSpacing: -0.7),
-                  ),
+                  Text(AppStrings.stockTransfer, style: _text(size: 21, weight: FontWeight.w600, letterSpacing: -0.7)),
                   const SizedBox(height: 4),
                   Text(AppStrings.transferPath, style: _text(size: 10, color: const Color(0xFF787166))),
                 ],
@@ -558,9 +676,8 @@ class _TransferPageState extends State<TransferPage> {
   }
 
   Widget _routeCard({required bool editing}) {
-    final kinds = _session.kinds;
-    final fromLabel = editing ? '${AppStrings.fromDate} ${kinds.$1}'.toUpperCase() : AppStrings.fromDate.toUpperCase();
-    final toLabel = editing ? '${AppStrings.toDate} ${kinds.$2}'.toUpperCase() : AppStrings.toDate.toUpperCase();
+    final ends = _ends;
+    final title = _type?.name ?? AppStrings.chooseTransferRoute;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(15),
@@ -575,7 +692,7 @@ class _TransferPageState extends State<TransferPage> {
             children: [
               Expanded(
                 child: Text(
-                  '${kinds.$1.toUpperCase()} TO ${kinds.$2.toUpperCase()}',
+                  title.toUpperCase(),
                   style: _text(size: 10, weight: FontWeight.w600, color: const Color(0xFF826537), letterSpacing: 0.4),
                 ),
               ),
@@ -592,9 +709,9 @@ class _TransferPageState extends State<TransferPage> {
           ),
           Row(
             children: [
-              Expanded(child: _place(fromLabel, _session.from.isEmpty ? AppStrings.chooseSource : _session.from)),
+              Expanded(child: _placeLabel(ends == null ? AppStrings.fromDate : ends.$1, _from.isEmpty ? AppStrings.chooseSource : _from)),
               const Icon(Icons.arrow_right_alt, color: Color(0xFF917C53)),
-              Expanded(child: _place(toLabel, _session.to.isEmpty ? AppStrings.chooseDestination : _session.to)),
+              Expanded(child: _placeLabel(ends == null ? AppStrings.toDate : ends.$2, _to.isEmpty ? AppStrings.chooseDestination : _to)),
             ],
           ),
         ],
@@ -602,31 +719,25 @@ class _TransferPageState extends State<TransferPage> {
     );
   }
 
-  Widget _place(String label, String value) {
+  Widget _placeLabel(String label, String value) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: _text(size: 9, color: const Color(0xFF826537), letterSpacing: 0.4),
-        ),
+        Text(label.toUpperCase(), style: _text(size: 9, color: const Color(0xFF826537), letterSpacing: 0.4)),
         const SizedBox(height: 2),
         Text(value, style: _text(size: 14, weight: FontWeight.w700)),
       ],
     );
   }
 
-  Widget _tabs(int selectedCount) {
+  Widget _tabs(int selectedCount, int stockCount) {
     return Container(
       padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEEEAE1),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: const Color(0xFFEEEAE1), borderRadius: BorderRadius.circular(10)),
       child: Row(
         children: [
-          _tab(AppStrings.allStock, _session.available().length, !_session.onlySelected, false),
-          _tab(AppStrings.selectedScope, selectedCount, _session.onlySelected, true),
+          _tab(AppStrings.allStock, stockCount, !_onlySelected, false),
+          _tab(AppStrings.selectedScope, selectedCount, _onlySelected, true),
         ],
       ),
     );
@@ -639,7 +750,10 @@ class _TransferPageState extends State<TransferPage> {
         borderRadius: BorderRadius.circular(7),
         child: InkWell(
           borderRadius: BorderRadius.circular(7),
-          onTap: () => setState(() => _session.onlySelected = onlySelected),
+          onTap: () => setState(() {
+            _onlySelected = onlySelected;
+            _shown = 60;
+          }),
           child: Container(
             alignment: Alignment.center,
             constraints: const BoxConstraints(minHeight: 37),
@@ -657,8 +771,8 @@ class _TransferPageState extends State<TransferPage> {
     );
   }
 
-  Widget _stockRow(TransferPiece piece) {
-    final on = _session.selected.contains(piece.id);
+  Widget _stockRow(InventoryPiece piece) {
+    final on = _selected.contains(piece.id);
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
       child: Material(
@@ -666,7 +780,13 @@ class _TransferPageState extends State<TransferPage> {
         borderRadius: BorderRadius.circular(11),
         child: InkWell(
           borderRadius: BorderRadius.circular(11),
-          onTap: () => setState(() => _session.toggle(piece.id, !on)),
+          onTap: () => setState(() {
+            if (on) {
+              _selected.remove(piece.id);
+            } else {
+              _selected.add(piece.id);
+            }
+          }),
           child: Container(
             constraints: const BoxConstraints(minHeight: 74),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -680,11 +800,7 @@ class _TransferPageState extends State<TransferPage> {
                   child: SizedBox(
                     width: 22,
                     height: 22,
-                    child: Checkbox(
-                      value: on,
-                      activeColor: const Color(0xFF8A682C),
-                      onChanged: (_) {},
-                    ),
+                    child: Checkbox(value: on, activeColor: const Color(0xFF8A682C), onChanged: (_) {}),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -696,7 +812,7 @@ class _TransferPageState extends State<TransferPage> {
                     children: [
                       Text('${piece.id} · ${piece.name}', style: _text(size: 13, weight: FontWeight.w700)),
                       Text(
-                        '${AppStrings.grossWeight} ${TransferDemoSession.grams(piece.grossMg)} g\n${AppStrings.netWeight} ${TransferDemoSession.grams(piece.netMg)} g',
+                        '${AppStrings.grossWeight} ${InventoryCatalog.grams(piece.milligrams)} g\n${AppStrings.netWeight} ${InventoryCatalog.grams(piece.netMilligrams ?? 0)} g',
                         style: _text(size: 11, color: _muted, height: 1.35),
                       ),
                     ],
@@ -710,7 +826,7 @@ class _TransferPageState extends State<TransferPage> {
     );
   }
 
-  Widget _footer(int count, int? gross) {
+  Widget _footer(int count, int gross) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       decoration: const BoxDecoration(
@@ -736,10 +852,7 @@ class _TransferPageState extends State<TransferPage> {
                   style: _text(size: 12),
                   children: [
                     const TextSpan(text: 'Gross '),
-                    TextSpan(
-                      text: TransferDemoSession.grams(gross),
-                      style: _text(size: 12, weight: FontWeight.w700),
-                    ),
+                    TextSpan(text: InventoryCatalog.grams(gross), style: _text(size: 12, weight: FontWeight.w700)),
                     const TextSpan(text: ' g'),
                   ],
                 ),
@@ -751,9 +864,9 @@ class _TransferPageState extends State<TransferPage> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _toggleScan,
-                  icon: Icon(_capturing ? Icons.pause : Icons.crop_free, size: 18),
-                  label: Text(_capturing ? AppStrings.pause : AppStrings.scan),
+                  onPressed: _sending ? null : () => _toggleScan(single: false),
+                  icon: Icon(_capturing && !_single ? Icons.pause : Icons.crop_free, size: 18),
+                  label: Text(_capturing && !_single ? AppStrings.pause : AppStrings.scan),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFFEEE5D1),
                     foregroundColor: const Color(0xFF85652C),
@@ -766,7 +879,7 @@ class _TransferPageState extends State<TransferPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: count == 0 ? null : _review,
+                  onPressed: count == 0 || _sending ? null : _review,
                   icon: const Icon(Icons.arrow_forward, size: 18),
                   label: const Text(AppStrings.reviewTransfer),
                   style: FilledButton.styleFrom(
@@ -781,11 +894,7 @@ class _TransferPageState extends State<TransferPage> {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            AppStrings.nothingMoves,
-            textAlign: TextAlign.center,
-            style: _text(size: 9, color: _note),
-          ),
+          Text(AppStrings.nothingMoves, textAlign: TextAlign.center, style: _text(size: 9, color: _note)),
         ],
       ),
     );
@@ -794,9 +903,7 @@ class _TransferPageState extends State<TransferPage> {
   Widget _reviewRow(String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFE7DFD0))),
-      ),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE7DFD0)))),
       child: Row(
         children: [
           Expanded(child: Text(label, style: _text(size: 12, color: const Color(0xFF807254)))),
@@ -834,14 +941,8 @@ class _TransferPageState extends State<TransferPage> {
       width: 35,
       height: 39,
       alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4EFE4),
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Text(
-        name.isEmpty ? '?' : name[0],
-        style: _text(size: 14, weight: FontWeight.w700, color: _gold),
-      ),
+      decoration: BoxDecoration(color: const Color(0xFFF4EFE4), borderRadius: BorderRadius.circular(7)),
+      child: Text(name.isEmpty ? '?' : name[0], style: _text(size: 14, weight: FontWeight.w700, color: _gold)),
     );
   }
 
@@ -887,23 +988,25 @@ class _TransferPageState extends State<TransferPage> {
 
 class _RouteForm extends StatefulWidget {
   const _RouteForm({
-    required this.route,
+    required this.types,
+    required this.type,
     required this.from,
     required this.to,
     required this.onApply,
   });
 
-  final int route;
+  final List<TransferTypeOption> types;
+  final TransferTypeOption? type;
   final String from;
   final String to;
-  final void Function(int route, String from, String to) onApply;
+  final void Function(TransferTypeOption type, String from, String to) onApply;
 
   @override
   State<_RouteForm> createState() => _RouteFormState();
 }
 
 class _RouteFormState extends State<_RouteForm> {
-  late int _route;
+  late TransferTypeOption _type;
   late String _from;
   late String _to;
   String? _error;
@@ -911,65 +1014,92 @@ class _RouteFormState extends State<_RouteForm> {
   @override
   void initState() {
     super.initState();
-    _route = widget.route;
-    _from = widget.from;
-    _to = widget.to;
+    _type = widget.type ?? widget.types.first;
+    final places = _places(_type);
+    _from = places.$1.contains(widget.from) ? widget.from : (places.$1.isEmpty ? '' : places.$1.first);
+    _to = places.$2.contains(widget.to) ? widget.to : (places.$2.isEmpty ? '' : places.$2.first);
   }
 
-  void _changeType(int index) {
-    final kinds = TransferDemoSession.routes[index];
-    final fromPlaces = TransferDemoSession.places[kinds.$1]!;
-    final toPlaces = TransferDemoSession.places[kinds.$2]!;
+  (List<String>, List<String>) _places(TransferTypeOption type) {
+    final ends = type.ends;
+    if (ends == null) return (const [], const []);
+    String title(String kind) => kind.isEmpty ? kind : '${kind[0].toUpperCase()}${kind.substring(1)}';
+    return (InventoryStock.instance.places(title(ends.$1)), InventoryStock.instance.places(title(ends.$2)));
+  }
+
+  void _changeType(TransferTypeOption type) {
+    final places = _places(type);
     setState(() {
-      _route = index;
-      _from = fromPlaces.first;
-      _to = kinds.$1 == kinds.$2 ? toPlaces[1] : toPlaces.first;
+      _type = type;
+      _from = places.$1.isEmpty ? '' : places.$1.first;
+      _to = places.$2.length > 1 && places.$1.isNotEmpty && places.$2.first == _from ? places.$2[1] : (places.$2.isEmpty ? '' : places.$2.first);
       _error = null;
     });
   }
 
   void _apply() {
-    final kinds = TransferDemoSession.routes[_route];
-    if (kinds.$1 == kinds.$2 && _from == _to) {
+    final ends = _type.ends;
+    if (_from.isEmpty || _to.isEmpty) {
+      setState(() => _error = AppStrings.validRoute);
+      return;
+    }
+    if (ends != null && ends.$1 == ends.$2 && _from == _to) {
       setState(() => _error = AppStrings.differentDestination);
       return;
     }
-    widget.onApply(_route, _from, _to);
+    widget.onApply(_type, _from, _to);
   }
 
   @override
   Widget build(BuildContext context) {
-    final kinds = TransferDemoSession.routes[_route];
-    final fromPlaces = TransferDemoSession.places[kinds.$1]!;
-    final toPlaces = TransferDemoSession.places[kinds.$2]!;
+    final places = _places(_type);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _drop(
-          AppStrings.transferType,
-          _route,
-          [
-            for (var i = 0; i < TransferDemoSession.routes.length; i++)
-              DropdownMenuItem(
-                value: i,
-                child: Text('${TransferDemoSession.routes[i].$1} to ${TransferDemoSession.routes[i].$2}'),
-              ),
+        DropdownButtonFormField<int>(
+          initialValue: _type.id,
+          items: [
+            for (final type in widget.types) DropdownMenuItem(value: type.id, child: Text(type.name)),
           ],
-          _changeType,
+          onChanged: (id) {
+            final next = widget.types.where((type) => type.id == id).firstOrNull;
+            if (next != null) _changeType(next);
+          },
+          decoration: InputDecoration(
+            labelText: AppStrings.transferType,
+            filled: true,
+            fillColor: AppColors.white,
+            border: _border(const Color(0xFFD5CBBC), 10),
+          ),
         ),
-        _drop(
-          '${AppStrings.fromDate} ${kinds.$1.toLowerCase()}',
-          _from,
-          [for (final place in fromPlaces) DropdownMenuItem(value: place, child: Text(place))],
-          (value) => setState(() => _from = value),
-        ),
-        _drop(
-          '${AppStrings.toDate} ${kinds.$2.toLowerCase()}',
-          _to,
-          [for (final place in toPlaces) DropdownMenuItem(value: place, child: Text(place))],
-          (value) => setState(() => _to = value),
-        ),
-        Text(AppStrings.routeExamples, style: _text(size: 12, color: const Color(0xFF817866), height: 1.4)),
+        const SizedBox(height: 12),
+        if (places.$1.isEmpty || places.$2.isEmpty)
+          Text(AppStrings.syncBeforeTransfer, style: _text(size: 12, color: const Color(0xFF817866), height: 1.4))
+        else ...[
+          DropdownButtonFormField<String>(
+            initialValue: _from,
+            items: [for (final place in places.$1) DropdownMenuItem(value: place, child: Text(place))],
+            onChanged: (value) => setState(() => _from = value ?? _from),
+            decoration: InputDecoration(
+              labelText: AppStrings.fromDate,
+              filled: true,
+              fillColor: AppColors.white,
+              border: _border(const Color(0xFFD5CBBC), 10),
+            ),
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: _to,
+            items: [for (final place in places.$2) DropdownMenuItem(value: place, child: Text(place))],
+            onChanged: (value) => setState(() => _to = value ?? _to),
+            decoration: InputDecoration(
+              labelText: AppStrings.toDate,
+              filled: true,
+              fillColor: AppColors.white,
+              border: _border(const Color(0xFFD5CBBC), 10),
+            ),
+          ),
+        ],
         if (_error != null) ...[
           const SizedBox(height: 8),
           Text(_error!, style: _text(size: 12, color: const Color(0xFF964A32))),
@@ -989,24 +1119,255 @@ class _RouteFormState extends State<_RouteForm> {
       ],
     );
   }
+}
 
-  Widget _drop<T>(String label, T value, List<DropdownMenuItem<T>> items, ValueChanged<T> onChanged) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: DropdownButtonFormField<T>(
-        key: ValueKey('$label-$value'),
-        initialValue: value,
-        items: items,
-        onChanged: (next) {
-          if (next != null) onChanged(next);
-        },
-        decoration: InputDecoration(
-          labelText: label,
-          filled: true,
-          fillColor: AppColors.white,
-          border: _border(const Color(0xFFD5CBBC), 10),
-          enabledBorder: _border(const Color(0xFFD5CBBC), 10),
-          focusedBorder: _border(const Color(0xFF967431), 10),
+class _TransferList extends StatefulWidget {
+  const _TransferList({required this.api, required this.types});
+
+  final StockTransferApi api;
+  final List<TransferTypeOption> types;
+
+  @override
+  State<_TransferList> createState() => _TransferListState();
+}
+
+class _TransferListState extends State<_TransferList> {
+  var _out = true;
+  var _loading = true;
+  var _busy = false;
+  String? _error;
+  List<TransferRecord> _records = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      _records = await widget.api.list(requestType: _out ? 'Out' : 'In');
+    } catch (error) {
+      _error = error.toString();
+      _records = const [];
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _cancel(TransferRecord record) async {
+    setState(() => _busy = true);
+    try {
+      final message = await widget.api.cancel(record.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message ?? AppStrings.transferUpdated)));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    }
+    if (mounted) await _load();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  Future<void> _decide(TransferRecord record, List<TransferLine> lines, int status) async {
+    setState(() => _busy = true);
+    try {
+      final message = await widget.api.decide(lines: lines, requestType: record.requestType, status: status);
+      if (status == 1) {
+        await widget.api.moveApproved(record: record, lines: lines);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message ?? AppStrings.transferUpdated)));
+        Navigator.pop(context);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    }
+    if (mounted) {
+      setState(() => _busy = false);
+      await _load();
+    }
+  }
+
+  void _open(TransferRecord record) {
+    final picked = <int>{for (final line in record.lines) if (line.approveId > 0 && (line.status ?? 0) == 0) line.approveId};
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFFFAF9F7),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(23))),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheet) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(22, 16, 22, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('${record.typeName} · ${record.id}', style: _text(size: 16, weight: FontWeight.w700)),
+                  const SizedBox(height: 6),
+                  Text('${record.from} → ${record.to}', style: _text(size: 12, color: const Color(0xFF6D6B66))),
+                  const SizedBox(height: 12),
+                  for (final line in record.lines)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: picked.contains(line.approveId),
+                      activeColor: const Color(0xFF8A682C),
+                      onChanged: line.approveId <= 0
+                          ? null
+                          : (value) => setSheet(() {
+                              if (value ?? false) {
+                                picked.add(line.approveId);
+                              } else {
+                                picked.remove(line.approveId);
+                              }
+                            }),
+                      title: Text('${line.itemCode} · ${line.name}', style: _text(size: 13, weight: FontWeight.w600)),
+                      subtitle: Text(line.gross.isEmpty ? '' : '${line.gross} g', style: _text(size: 11)),
+                    ),
+                  if (record.selfApproval) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: _busy
+                                ? null
+                                : () {
+                                    final lines = record.lines.where((line) => picked.contains(line.approveId)).toList();
+                                    if (lines.isEmpty) return;
+                                    Navigator.pop(context);
+                                    unawaited(_decide(record, lines, 1));
+                                  },
+                            child: const Text(AppStrings.approve),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _busy
+                                ? null
+                                : () {
+                                    final lines = record.lines.where((line) => picked.contains(line.approveId)).toList();
+                                    if (lines.isEmpty) return;
+                                    Navigator.pop(context);
+                                    unawaited(_decide(record, lines, 2));
+                                  },
+                            child: const Text(AppStrings.reject),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (record.pending > 0) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              Navigator.pop(context);
+                              unawaited(_cancel(record));
+                            },
+                      child: const Text(AppStrings.cancelTransfer),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final height = MediaQuery.sizeOf(context).height * 0.82;
+    return SizedBox(
+      height: height,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(AppStrings.transferList, style: _text(size: 20, weight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(child: _side(AppStrings.outgoing, _out, () => _switch(true))),
+                const SizedBox(width: 8),
+                Expanded(child: _side(AppStrings.incoming, !_out, () => _switch(false))),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(strokeWidth: 2))
+                  : _error != null
+                      ? Text(_error!, style: _text(size: 13, color: const Color(0xFF964A32)))
+                      : _records.isEmpty
+                          ? Text(AppStrings.transfersAppearHere, style: _text(size: 13, color: const Color(0xFF6D6B66)))
+                          : ListView(
+                              children: [
+                                for (final record in _records)
+                                  InkWell(
+                                    onTap: () => _open(record),
+                                    child: Container(
+                                      width: double.infinity,
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.white,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: const Color(0xFFE3DDD1)),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('${record.typeName} · ${record.id}', style: _text(size: 14, weight: FontWeight.w700)),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${record.from} → ${record.to}\nP:${record.pending}  A:${record.approved}  R:${record.rejected}',
+                                            style: _text(size: 12, color: const Color(0xFF6D6B66), height: 1.4),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _switch(bool out) {
+    if (_out == out) return;
+    setState(() => _out = out);
+    unawaited(_load());
+  }
+
+  Widget _side(String label, bool active, VoidCallback onTap) {
+    return Material(
+      color: active ? AppColors.white : const Color(0xFFEEEAE1),
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: Container(
+          alignment: Alignment.center,
+          constraints: const BoxConstraints(minHeight: 40),
+          child: Text(label, style: _text(size: 13, weight: FontWeight.w600)),
         ),
       ),
     );
