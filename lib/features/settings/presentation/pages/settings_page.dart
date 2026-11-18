@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../settings_controller.dart';
@@ -105,8 +106,95 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           ),
         ),
+        const SizedBox(height: 12),
+        _tile(
+          title: tx('language', 'Language'),
+          subtitle: tx(_settings.language, _settings.language == 'hi' ? 'हिन्दी' : _settings.language == 'ar' ? 'العربية' : 'English'),
+          onTap: _chooseLanguage,
+        ),
+        const SizedBox(height: 12),
+        _tile(
+          title: tx('sheetUrl', 'Sheet URL'),
+          subtitle: _settings.sheetUrl.isEmpty ? tx('setSheetUrl', 'Set the Google Sheet URL') : _settings.sheetUrl,
+          onTap: _editSheet,
+        ),
       ],
     );
+  }
+
+  Widget _tile({required String title, required String subtitle, required VoidCallback onTap}) {
+    return Material(
+      color: AppColors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(color: AppColors.cardBorder),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(16, 6, 12, 6),
+        title: Text(title, style: _text(size: AppTypography.body, weight: FontWeight.w700)),
+        subtitle: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: _text(size: AppTypography.label, color: AppColors.muted)),
+        trailing: const Icon(Icons.chevron_right, color: AppColors.muted),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  Future<void> _chooseLanguage() async {
+    var selected = _settings.language;
+    final next = await showDialog<String>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => AlertDialog(
+          backgroundColor: AppColors.white,
+          title: Text(tx('selectLanguage', 'Select language'), style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700)),
+          content: RadioGroup<String>(
+            groupValue: selected,
+            onChanged: (value) => setSheet(() => selected = value ?? selected),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final code in const ['en', 'hi', 'ar'])
+                  RadioListTile<String>(
+                    value: code,
+                    activeColor: AppColors.goldText,
+                    title: Text(tx(code == 'en' ? 'english' : code == 'hi' ? 'hindi' : 'arabic', code == 'en' ? 'English' : code == 'hi' ? 'हिन्दी' : 'العربية')),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text(tx('cancel', 'Cancel'))),
+            TextButton(
+              onPressed: () => Navigator.pop(context, selected),
+              child: Text(tx('save', 'Save'), style: const TextStyle(color: AppColors.goldText)),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (next == null) return;
+    await _settings.setLanguage(next);
+  }
+
+  Future<void> _editSheet() async {
+    final field = TextEditingController(text: _settings.sheetUrl);
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.white,
+        title: Text(tx('sheetUrl', 'Sheet URL'), style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: field,
+          decoration: InputDecoration(hintText: tx('setSheetUrl', 'Set the Google Sheet URL')),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tx('cancel', 'Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tx('save', 'Save'), style: const TextStyle(color: AppColors.goldText))),
+        ],
+      ),
+    );
+    if (saved == true) await _settings.setSheetUrl(field.text);
+    field.dispose();
   }
 }
 

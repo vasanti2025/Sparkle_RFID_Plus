@@ -19,4 +19,10 @@ abstract class ProductRepository {
   });
 
   Future<int> storedCount({String kind = StoredRecord.kindProduct});
+
+  Future<int> exportStoredCsv(String path, {void Function(int written)? onProgress});
+
+  Future<Map<String, String>> storedRfidMap();
+
+  Future<int> importProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress});
 }

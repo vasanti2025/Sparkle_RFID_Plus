@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/rfid/scan_sound.dart';
@@ -75,13 +76,19 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
   @override
   void initState() {
     super.initState();
+    Injection.settings.addListener(_onLanguage);
     _trigger = RfidTrigger()..attach(_onTrigger);
     _tags = RfidService.instance.tagStream.listen(_onTags);
     unawaited(_open());
   }
 
+  void _onLanguage() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    Injection.settings.removeListener(_onLanguage);
     _closing = true;
     _singleTimer?.cancel();
     _flushTimer?.cancel();
@@ -313,7 +320,7 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
     if (_loading) return;
     final code = AppSession.clientCode;
     if (code.isEmpty || _deviceId.isEmpty) {
-      _toast(AppStrings.deviceMissing);
+      _toast(tx('deviceMissing', AppStrings.deviceMissing));
       return;
     }
     if (Injection.settings.localWifiMode) {
@@ -337,7 +344,7 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
       });
     }
     if (rows.isEmpty) {
-      _toast(AppStrings.needRfid);
+      _toast(tx('needRfid', AppStrings.needRfid));
       return;
     }
     setState(() => _loading = true);
@@ -349,11 +356,11 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
         _seen.clear();
         _pending.clear();
       });
-      _toast(AppStrings.itemsSaved);
+      _toast(tx('itemsSaved', AppStrings.itemsSaved));
     } on ServerException {
-      _toast(AppStrings.saveFailed);
+      _toast(tx('saveFailed', AppStrings.saveFailed));
     } catch (_) {
-      _toast(AppStrings.saveFailed);
+      _toast(tx('saveFailed', AppStrings.saveFailed));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -362,7 +369,7 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
   Future<void> _saveLocal(String code) async {
     final items = _payload(_scans);
     if (items.isEmpty) {
-      _toast(AppStrings.needRfid);
+      _toast(tx('needRfid', AppStrings.needRfid));
       return;
     }
     if (_server == null) await _startServer();
@@ -370,28 +377,28 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
     final ip = await _wifiAddress();
     if (!mounted) return;
     if (ip == null) {
-      _toast(AppStrings.noWifiAddress);
+      _toast(tx('noWifiAddress', AppStrings.noWifiAddress));
       return;
     }
-    _toast('${AppStrings.localDesktopReady} http://$ip:8080/rfid-data');
+    _toast('${tx('localDesktopReady', AppStrings.localDesktopReady)} http://$ip:8080/rfid-data');
   }
 
   Future<void> _clear() async {
     final yes = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text(AppStrings.clear),
-        content: const Text(AppStrings.clearDesktopConfirm),
+        title: Text(tx('clear', AppStrings.clear)),
+        content: Text(tx('clearDesktopConfirm', AppStrings.clearDesktopConfirm)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text(AppStrings.cancel)),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text(AppStrings.clear)),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text(tx('cancel', AppStrings.cancel))),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: Text(tx('clear', AppStrings.clear))),
         ],
       ),
     );
     if (yes != true || !mounted) return;
     final code = AppSession.clientCode;
     if (code.isEmpty || _deviceId.isEmpty) {
-      _toast(AppStrings.deviceMissing);
+      _toast(tx('deviceMissing', AppStrings.deviceMissing));
       return;
     }
     setState(() => _loading = true);
@@ -399,7 +406,7 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
       final deleted = await _api.clear(clientCode: code, deviceId: _deviceId);
       if (!mounted) return;
       if (deleted < 0) {
-        _toast(AppStrings.clearFailed);
+        _toast(tx('clearFailed', AppStrings.clearFailed));
         return;
       }
       setState(() {
@@ -410,7 +417,7 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
       _queueLive(const []);
       _toast(deleted == 0 ? 'Cleared' : '$deleted records cleared');
     } catch (_) {
-      _toast(AppStrings.clearFailed);
+      _toast(tx('clearFailed', AppStrings.clearFailed));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -425,12 +432,12 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
       _seen.clear();
     });
     _queueLive(const []);
-    _toast(AppStrings.scanReset);
+    _toast(tx('scanReset', AppStrings.scanReset));
   }
 
   Future<void> _exportSheet() async {
     if (_scans.isEmpty) {
-      _toast(AppStrings.newScansAppear);
+      _toast(tx('newScansAppear', AppStrings.newScansAppear));
       return;
     }
     final choice = await showModalBottomSheet<String>(
@@ -445,12 +452,12 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
           children: [
             ListTile(
               leading: const Icon(Icons.mail_outline, color: AppColors.charcoal),
-              title: const Text(AppStrings.mailExport),
+              title: Text(tx('mailExport', AppStrings.mailExport)),
               onTap: () => Navigator.pop(context, 'mail'),
             ),
             ListTile(
               leading: const Icon(Icons.download_outlined, color: AppColors.charcoal),
-              title: const Text(AppStrings.downloadExcel),
+              title: Text(tx('downloadExcel', AppStrings.downloadExcel)),
               onTap: () => Navigator.pop(context, 'download'),
             ),
           ],
@@ -465,13 +472,13 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
       if (choice == 'mail') {
         await Share.shareXFiles(
           [XFile(file.path, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')],
-          subject: AppStrings.scanToDesktopTitle,
+          subject: tx('scanToDesktopTitle', AppStrings.scanToDesktopTitle),
         );
       } else {
-        _toast('${AppStrings.excelSaved}: ${file.path}');
+        _toast('${tx('excelSaved', AppStrings.excelSaved)}: ${file.path}');
       }
     } catch (_) {
-      _toast(AppStrings.excelFailed);
+      _toast(tx('excelFailed', AppStrings.excelFailed));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -505,10 +512,10 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
           decoration: const InputDecoration(labelText: 'RFID'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text(AppStrings.cancel)),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(tx('cancel', AppStrings.cancel))),
           TextButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text(AppStrings.save),
+            child: Text(tx('save', AppStrings.save)),
           ),
         ],
       ),
@@ -681,7 +688,9 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Directionality(
+      textDirection: featureDirection,
+      child: Scaffold(
       backgroundColor: _canvas,
       body: SafeArea(
         child: Stack(
@@ -717,12 +726,12 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        AppStrings.scanToDesktopTitle,
+                      Text(
+                        tx('scanToDesktopTitle', AppStrings.scanToDesktopTitle),
                         style: TextStyle(color: AppColors.charcoal, fontSize: 22, fontWeight: FontWeight.w700, height: 1.1),
                       ),
                       const SizedBox(height: 2),
-                      const Text(AppStrings.scanTagsReview, style: TextStyle(color: AppColors.muted, fontSize: 13)),
+                      Text(tx('scanTagsReview', AppStrings.scanTagsReview), style: TextStyle(color: AppColors.muted, fontSize: 13)),
                       const SizedBox(height: 10),
                       _totalCard(),
                       const SizedBox(height: 10),
@@ -730,16 +739,16 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Expanded(
+                          Expanded(
                             child: Text(
-                              AppStrings.scannedItems,
+                              tx('scannedItems', AppStrings.scannedItems),
                               style: TextStyle(color: AppColors.charcoal, fontSize: 16, fontWeight: FontWeight.w700),
                             ),
                           ),
                           OutlinedButton.icon(
                             onPressed: _exportSheet,
                             icon: const Icon(Icons.upload_outlined, size: 16),
-                            label: const Text(AppStrings.exportData),
+                            label: Text(tx('exportData', AppStrings.exportData)),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.charcoal,
                               side: const BorderSide(color: AppColors.fieldBorder),
@@ -752,10 +761,10 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
                   ),
                 ),
                 Expanded(child: _list()),
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 8),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
                   child: Text(
-                    AppStrings.newScansAppear,
+                    tx('newScansAppear', AppStrings.newScansAppear),
                     style: TextStyle(color: Color(0xFFB7B2A8), fontSize: 13),
                   ),
                 ),
@@ -764,15 +773,15 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
                   padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
                   child: Row(
                     children: [
-                      _action(Icons.download_outlined, AppStrings.save, _save),
+                      _action(Icons.download_outlined, tx('save', AppStrings.save), _save),
                       const _ActionLine(),
-                      _action(Icons.sensors, _scanning && !_single ? 'Stop' : AppStrings.gscan, () {
+                      _action(Icons.sensors, _scanning && !_single ? 'Stop' : tx('gscan', AppStrings.gscan), () {
                         unawaited(_start(single: false));
                       }),
                       const _ActionLine(),
-                      _action(Icons.delete_outline, AppStrings.clear, _clear),
+                      _action(Icons.delete_outline, tx('clear', AppStrings.clear), _clear),
                       const _ActionLine(),
-                      _action(Icons.restart_alt, AppStrings.reset, () => unawaited(_reset())),
+                      _action(Icons.restart_alt, tx('reset', AppStrings.reset), () => unawaited(_reset())),
                     ],
                   ),
                 ),
@@ -791,6 +800,7 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
               ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -847,8 +857,8 @@ class _ScanToDesktopPageState extends State<ScanToDesktopPage> {
           const SizedBox(width: 12),
           Container(width: 1, height: 28, color: Color(0x33FFFFFF)),
           const SizedBox(width: 12),
-          const Expanded(
-            child: Text(AppStrings.totalItems, style: TextStyle(color: AppColors.white, fontSize: 14)),
+          Expanded(
+            child: Text(tx('totalItems', AppStrings.totalItems), style: TextStyle(color: AppColors.white, fontSize: 14)),
           ),
           Text(
             '${_scans.length}',

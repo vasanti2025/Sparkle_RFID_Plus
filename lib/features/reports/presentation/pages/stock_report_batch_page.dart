@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/stock_report_api.dart';
@@ -40,12 +42,18 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
   @override
   void initState() {
     super.initState();
+    Injection.settings.addListener(_onLanguage);
     _search.addListener(_onSearch);
     unawaited(_load());
   }
 
+  void _onLanguage() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    Injection.settings.removeListener(_onLanguage);
     _debounce?.cancel();
     _exportTimer?.cancel();
     _search.dispose();
@@ -57,7 +65,7 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
     if (code.isEmpty) {
       setState(() {
         _loading = false;
-        _error = AppStrings.reportSignIn;
+        _error = tx('reportSignIn', AppStrings.reportSignIn);
       });
       return;
     }
@@ -86,7 +94,7 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = AppStrings.reportLoadFailed;
+        _error = tx('reportLoadFailed', AppStrings.reportLoadFailed);
       });
     }
   }
@@ -149,7 +157,7 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
       await sink.close();
       await Share.shareXFiles(
         [XFile(file.path, mimeType: 'text/csv', name: 'BatchReport_$safe.csv')],
-        subject: AppStrings.batchDetails,
+        subject: tx('batchDetails', AppStrings.batchDetails),
       );
       if (!mounted) return;
       _exportTimer?.cancel();
@@ -159,7 +167,7 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
       });
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(AppStrings.reportLoadFailed)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tx('reportLoadFailed', AppStrings.reportLoadFailed))));
       }
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -168,7 +176,9 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Directionality(
+      textDirection: featureDirection,
+      child: Scaffold(
       backgroundColor: AppColors.white,
       body: SafeArea(
         child: Stack(
@@ -176,7 +186,7 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
             Column(
               children: [
                 ReportHeader(
-                  title: AppStrings.batchDetails,
+                  title: tx('batchDetails', AppStrings.batchDetails),
                   onDownload: _matched.isEmpty && _unmatched.isEmpty ? null : () => unawaited(_export()),
                 ),
                 if (_loading || _exporting)
@@ -192,6 +202,7 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -200,16 +211,16 @@ class _StockReportBatchPageState extends State<StockReportBatchPage> {
     if (_error != null) return Center(child: Text(_error!, style: const TextStyle(color: AppColors.muted)));
     return CustomScrollView(
       slivers: [
-        _section(AppStrings.matchedItems, _matchedIndex.length, reportMatchedFill, reportMatchedText),
+        _section(tx('matchedItems', AppStrings.matchedItems), _matchedIndex.length, reportMatchedFill, reportMatchedText),
         if (_matchedIndex.isEmpty)
-          const SliverToBoxAdapter(child: _EmptyNote(AppStrings.noMatchedItems))
+          SliverToBoxAdapter(child: _EmptyNote(tx('noMatchedItems', AppStrings.noMatchedItems)))
         else ...[
           const SliverToBoxAdapter(child: _BatchHead()),
           _rows(_matched, _matchedIndex),
         ],
-        _section(AppStrings.unmatchedItems, _unmatchedIndex.length, reportUnmatchedFill, reportUnmatchedText),
+        _section(tx('unmatchedItems', AppStrings.unmatchedItems), _unmatchedIndex.length, reportUnmatchedFill, reportUnmatchedText),
         if (_unmatchedIndex.isEmpty)
-          const SliverToBoxAdapter(child: _EmptyNote(AppStrings.noUnmatchedItems))
+          SliverToBoxAdapter(child: _EmptyNote(tx('noUnmatchedItems', AppStrings.noUnmatchedItems)))
         else ...[
           const SliverToBoxAdapter(child: _BatchHead()),
           _rows(_unmatched, _unmatchedIndex),
@@ -281,7 +292,7 @@ class _BatchHead extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const style = TextStyle(color: AppColors.charcoal, fontSize: 11, fontWeight: FontWeight.w700);
-    return const ColoredBox(
+    return ColoredBox(
       color: reportCanvas,
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -289,10 +300,10 @@ class _BatchHead extends StatelessWidget {
         height: 28,
         child: Row(
           children: [
-            Expanded(flex: 3, child: Text(AppStrings.itemCode, style: style)),
-            Expanded(flex: 3, child: Text(AppStrings.product, style: style)),
-            Expanded(flex: 3, child: Text(AppStrings.branch, style: style)),
-            Expanded(flex: 2, child: Text(AppStrings.category, style: style)),
+            Expanded(flex: 3, child: Text(tx('itemCode', AppStrings.itemCode), style: style)),
+            Expanded(flex: 3, child: Text(tx('product', AppStrings.product), style: style)),
+            Expanded(flex: 3, child: Text(tx('branch', AppStrings.branch), style: style)),
+            Expanded(flex: 2, child: Text(tx('category', AppStrings.category), style: style)),
             Expanded(flex: 3, child: Text('RFID', style: style)),
           ],
         ),

@@ -72,4 +72,17 @@ class ProductRepositoryImpl implements ProductRepository {
   Future<int> storedCount({String kind = StoredRecord.kindProduct}) {
     return localDataSource.count(kind: kind);
   }
+
+  @override
+  Future<int> exportStoredCsv(String path, {void Function(int written)? onProgress}) {
+    return localDataSource.writeProductCsv(path, onProgress: onProgress);
+  }
+
+  @override
+  Future<Map<String, String>> storedRfidMap() => localDataSource.rfidMap();
+
+  @override
+  Future<int> importProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress}) {
+    return localDataSource.upsertProducts(items, onProgress: onProgress);
+  }
 }

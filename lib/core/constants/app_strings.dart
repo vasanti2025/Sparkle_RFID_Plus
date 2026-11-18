@@ -466,9 +466,13 @@ abstract final class AppStrings {
   static const productionFormat = 'Production format';
   static const excel = 'Excel';
   static const downloadDemoCsv = 'Download demo CSV';
-  static const csvHint =
-      'This prototype exports CSV for inspection. The app keeps its existing Excel export implementation.';
+  static const csvHint = 'Creates a CSV of the product list. Mail it, or save it on this device.';
   static const demoCsvSaved = 'Demo CSV saved.';
+  static const saveOnDevice = 'Save on device';
+  static const exportingProducts = 'Exporting products';
+  static const noProductsToExport = 'No products to export. Sync products first.';
+  static const productCsvSaved = 'CSV saved';
+  static const productExportFailed = 'Could not create the CSV file';
   static const oneProduct = 'One product';
   static const oneProductHint = 'Add one piece with its identity and details.';
   static const multipleProducts = 'Multiple products';

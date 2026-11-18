@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/constants/app_strings.dart';
+import '../../../core/locale/feature_strings.dart';
 import '../../../core/theme/app_colors.dart';
 
 const reportCanvas = Color(0xFFFCF6F5);
@@ -159,7 +160,7 @@ class ReportSearch extends StatelessWidget {
       controller: controller,
       style: const TextStyle(color: AppColors.charcoal, fontSize: 14),
       decoration: InputDecoration(
-        hintText: AppStrings.searchReportItems,
+        hintText: tx('searchReportItems', AppStrings.searchReportItems),
         hintStyle: const TextStyle(color: AppColors.muted, fontSize: 14),
         prefixIcon: const Icon(Icons.search, color: AppColors.muted, size: 20),
         suffixIcon: searching
@@ -188,7 +189,7 @@ class ExportBanner extends StatelessWidget {
     return Material(
       color: AppColors.charcoal,
       borderRadius: BorderRadius.circular(16),
-      child: const Padding(
+      child: Padding(
         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         child: Row(
           children: [
@@ -196,7 +197,7 @@ class ExportBanner extends StatelessWidget {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                AppStrings.reportExported,
+                tx('reportExported', AppStrings.reportExported),
                 style: TextStyle(color: AppColors.white, fontSize: 14, fontWeight: FontWeight.w600),
               ),
             ),

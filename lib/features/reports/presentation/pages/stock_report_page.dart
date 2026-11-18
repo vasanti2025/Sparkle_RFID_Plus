@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/stock_report_api.dart';
@@ -51,13 +53,19 @@ class _StockReportPageState extends State<StockReportPage> {
     super.initState();
     final today = DateTime.now();
     _reportDate = DateTime(today.year, today.month, today.day);
+    Injection.settings.addListener(_onLanguage);
     unawaited(_loadSessions());
     unawaited(_loadConsolidated());
     unawaited(_loadBranches());
   }
 
+  void _onLanguage() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    Injection.settings.removeListener(_onLanguage);
     _exportTimer?.cancel();
     super.dispose();
   }
@@ -79,7 +87,7 @@ class _StockReportPageState extends State<StockReportPage> {
   Future<void> _loadSessions() async {
     final code = AppSession.clientCode.trim();
     if (code.isEmpty) {
-      setState(() => _error = AppStrings.reportSignIn);
+      setState(() => _error = tx('reportSignIn', AppStrings.reportSignIn));
       return;
     }
     setState(() {
@@ -99,7 +107,7 @@ class _StockReportPageState extends State<StockReportPage> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = AppStrings.reportLoadFailed);
+      setState(() => _error = tx('reportLoadFailed', AppStrings.reportLoadFailed));
     } finally {
       if (mounted) setState(() => _loadingSessions = false);
     }
@@ -108,7 +116,7 @@ class _StockReportPageState extends State<StockReportPage> {
   Future<void> _loadConsolidated() async {
     final code = AppSession.clientCode.trim();
     if (code.isEmpty) {
-      setState(() => _reportError = AppStrings.reportSignIn);
+      setState(() => _reportError = tx('reportSignIn', AppStrings.reportSignIn));
       return;
     }
     final date = reportIso(_reportDate);
@@ -130,7 +138,7 @@ class _StockReportPageState extends State<StockReportPage> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _reportError = AppStrings.reportLoadFailed);
+      setState(() => _reportError = tx('reportLoadFailed', AppStrings.reportLoadFailed));
     } finally {
       if (mounted) setState(() => _loadingReport = false);
     }
@@ -206,12 +214,12 @@ class _StockReportPageState extends State<StockReportPage> {
       });
       await Share.shareXFiles(
         [XFile(path, mimeType: 'text/csv', name: path.split(Platform.pathSeparator).last)],
-        subject: AppStrings.stockVerification,
+        subject: tx('stockVerification', AppStrings.stockVerification),
       );
       _showExported();
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(AppStrings.reportLoadFailed)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tx('reportLoadFailed', AppStrings.reportLoadFailed))));
       }
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -233,7 +241,9 @@ class _StockReportPageState extends State<StockReportPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Directionality(
+      textDirection: featureDirection,
+      child: Scaffold(
       backgroundColor: AppColors.white,
       body: SafeArea(
         child: Stack(
@@ -241,7 +251,7 @@ class _StockReportPageState extends State<StockReportPage> {
             Column(
               children: [
                 ReportHeader(
-                  title: AppStrings.stockVerification,
+                  title: tx('stockVerification', AppStrings.stockVerification),
                   onDownload: _batchMode || _consolidatedBody == null ? null : () => unawaited(_exportConsolidated()),
                 ),
                 Padding(
@@ -270,6 +280,7 @@ class _StockReportPageState extends State<StockReportPage> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -280,8 +291,8 @@ class _StockReportPageState extends State<StockReportPage> {
       decoration: BoxDecoration(color: const Color(0xFFF3F0EA), borderRadius: BorderRadius.circular(14)),
       child: Row(
         children: [
-          _mode(AppStrings.batchWise, _batchMode, () => _switchMode(true)),
-          _mode(AppStrings.consolidated, !_batchMode, () => _switchMode(false)),
+          _mode(tx('batchWise', AppStrings.batchWise), _batchMode, () => _switchMode(true)),
+          _mode(tx('consolidated', AppStrings.consolidated), !_batchMode, () => _switchMode(false)),
         ],
       ),
     );
@@ -336,7 +347,7 @@ class _StockReportPageState extends State<StockReportPage> {
   Widget _batchList() {
     if (_error != null && _sessions.isEmpty) return _message(_error!, retry: _loadSessions);
     if (_loadingSessions && _sessions.isEmpty) return const Center(child: CircularProgressIndicator(color: AppColors.charcoal));
-    if (_sessionsReady && _visible.isEmpty) return _message(AppStrings.noBatches, retry: _loadSessions);
+    if (_sessionsReady && _visible.isEmpty) return _message(tx('noBatches', AppStrings.noBatches), retry: _loadSessions);
     return LayoutBuilder(
       builder: (context, constraints) {
         final view = constraints.maxWidth;
@@ -385,12 +396,12 @@ class _StockReportPageState extends State<StockReportPage> {
         child: Row(
           children: [
             SizedBox(width: view, child: _visibleBatchHead(style)),
-            const SizedBox(width: 72, child: Text(AppStrings.reportMatch, textAlign: TextAlign.right, style: style)),
-            const SizedBox(
+            SizedBox(width: 72, child: Text(tx('reportMatch', AppStrings.reportMatch), textAlign: TextAlign.right, style: style)),
+            SizedBox(
               width: 88,
               child: Padding(
                 padding: EdgeInsets.only(right: 16),
-                child: Text(AppStrings.unmatched, textAlign: TextAlign.right, style: style),
+                child: Text(tx('unmatched', AppStrings.unmatched), textAlign: TextAlign.right, style: style),
               ),
             ),
           ],
@@ -404,9 +415,9 @@ class _StockReportPageState extends State<StockReportPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          Expanded(flex: 4, child: Text(AppStrings.branch, style: style)),
-          Expanded(flex: 5, child: Text(AppStrings.startEnd, style: style)),
-          Expanded(flex: 3, child: Text(AppStrings.totalQty, textAlign: TextAlign.right, style: style)),
+          Expanded(flex: 4, child: Text(tx('branch', AppStrings.branch), style: style)),
+          Expanded(flex: 5, child: Text(tx('startEnd', AppStrings.startEnd), style: style)),
+          Expanded(flex: 3, child: Text(tx('totalQty', AppStrings.totalQty), textAlign: TextAlign.right, style: style)),
         ],
       ),
     );
@@ -415,7 +426,7 @@ class _StockReportPageState extends State<StockReportPage> {
   Widget _summaryList() {
     if (_reportError != null && _tree.isEmpty) return _message(_reportError!, retry: _loadConsolidated);
     if (_loadingReport && _tree.isEmpty) return const Center(child: CircularProgressIndicator(color: AppColors.charcoal));
-    if (_reportReady && _tree.isEmpty) return _message(AppStrings.noReportForDate, retry: _loadConsolidated);
+    if (_reportReady && _tree.isEmpty) return _message(tx('noReportForDate', AppStrings.noReportForDate), retry: _loadConsolidated);
     final lines = _treeLines();
     return Column(
       children: [
@@ -446,7 +457,7 @@ class _StockReportPageState extends State<StockReportPage> {
   void _openItems(_TreeLine line, String type) {
     final body = _consolidatedBody;
     if (body == null || body.isEmpty) return;
-    final title = line.node.name.isEmpty ? AppStrings.branch : line.node.name;
+    final title = line.node.name.isEmpty ? tx('branch', AppStrings.branch) : line.node.name;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => StockReportItemsPage(
@@ -511,16 +522,16 @@ class _StockReportPageState extends State<StockReportPage> {
 
   Widget _summaryHead() {
     const style = TextStyle(color: AppColors.charcoal, fontSize: 12, fontWeight: FontWeight.w700);
-    return const ColoredBox(
+    return ColoredBox(
       color: reportCanvas,
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 10, 16, 10),
         child: Row(
           children: [
-            Expanded(flex: 4, child: Text(AppStrings.branch, style: style)),
-            Expanded(flex: 2, child: Text(AppStrings.reportTotal, textAlign: TextAlign.right, style: style)),
-            Expanded(flex: 2, child: Text(AppStrings.matched, textAlign: TextAlign.right, style: style)),
-            Expanded(flex: 3, child: Text(AppStrings.unmatched, textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 4, child: Text(tx('branch', AppStrings.branch), style: style)),
+            Expanded(flex: 2, child: Text(tx('reportTotal', AppStrings.reportTotal), textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 2, child: Text(tx('matched', AppStrings.matched), textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 3, child: Text(tx('unmatched', AppStrings.unmatched), textAlign: TextAlign.right, style: style)),
           ],
         ),
       ),
@@ -533,7 +544,7 @@ class _StockReportPageState extends State<StockReportPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(text, style: const TextStyle(color: AppColors.muted)),
-          TextButton(onPressed: () => unawaited(retry()), child: const Text(AppStrings.tryAgain)),
+          TextButton(onPressed: () => unawaited(retry()), child: Text(tx('tryAgain', AppStrings.tryAgain))),
         ],
       ),
     );
@@ -761,32 +772,32 @@ class _FilterSheetState extends State<_FilterSheet> {
           children: [
             Row(
               children: [
-                const Expanded(
-                  child: Text(AppStrings.filterReports, style: TextStyle(color: AppColors.charcoal, fontSize: 18, fontWeight: FontWeight.w700)),
+                Expanded(
+                  child: Text(tx('filterReports', AppStrings.filterReports), style: const TextStyle(color: AppColors.charcoal, fontSize: 18, fontWeight: FontWeight.w700)),
                 ),
                 IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: AppColors.charcoal)),
               ],
             ),
             const SizedBox(height: 8),
-            const Text(AppStrings.branch, style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            Text(tx('branch', AppStrings.branch), style: TextStyle(color: AppColors.muted, fontSize: 12)),
             const SizedBox(height: 6),
             DropdownButtonFormField<int?>(
               initialValue: _branchId,
               isExpanded: true,
               decoration: _fieldDecoration(),
               items: [
-                const DropdownMenuItem<int?>(value: null, child: Text(AppStrings.allBranches)),
+                DropdownMenuItem<int?>(value: null, child: Text(tx('allBranches', AppStrings.allBranches))),
                 for (final branch in widget.branches)
                   DropdownMenuItem<int?>(value: branch.id, child: Text(branch.name, overflow: TextOverflow.ellipsis)),
               ],
               onChanged: (value) => setState(() => _branchId = value),
             ),
             const SizedBox(height: 14),
-            const Text(AppStrings.reportFromDate, style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            Text(tx('reportFromDate', AppStrings.reportFromDate), style: TextStyle(color: AppColors.muted, fontSize: 12)),
             const SizedBox(height: 6),
             _dateBox(reportDayLabel(_from), () => unawaited(_pick(true))),
             const SizedBox(height: 14),
-            const Text(AppStrings.reportToDate, style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            Text(tx('reportToDate', AppStrings.reportToDate), style: TextStyle(color: AppColors.muted, fontSize: 12)),
             const SizedBox(height: 6),
             _dateBox(reportDayLabel(_to), () => unawaited(_pick(false))),
             const SizedBox(height: 18),
@@ -801,7 +812,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text(AppStrings.reset),
+                    child: Text(tx('reset', AppStrings.reset)),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -817,7 +828,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text(AppStrings.applyFilters),
+                    child: Text(tx('applyFilters', AppStrings.applyFilters)),
                   ),
                 ),
               ],
@@ -888,8 +899,8 @@ class _DateSheetState extends State<_DateSheet> {
           children: [
             Row(
               children: [
-                const Expanded(
-                  child: Text(AppStrings.selectDate, style: TextStyle(color: AppColors.charcoal, fontSize: 18, fontWeight: FontWeight.w700)),
+                Expanded(
+                  child: Text(tx('selectDate', AppStrings.selectDate), style: const TextStyle(color: AppColors.charcoal, fontSize: 18, fontWeight: FontWeight.w700)),
                 ),
                 IconButton(
                   onPressed: _visible.year <= 2020 && _visible.month == 1
@@ -967,7 +978,7 @@ class _DateSheetState extends State<_DateSheet> {
                 Expanded(
                   child: TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text(AppStrings.cancel, style: TextStyle(color: AppColors.charcoal)),
+                    child: Text(tx('cancel', AppStrings.cancel), style: TextStyle(color: AppColors.charcoal)),
                   ),
                 ),
                 Expanded(
@@ -979,7 +990,7 @@ class _DateSheetState extends State<_DateSheet> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text(AppStrings.applyDate),
+                    child: Text(tx('applyDate', AppStrings.applyDate)),
                   ),
                 ),
               ],

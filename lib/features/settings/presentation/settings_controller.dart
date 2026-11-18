@@ -13,6 +13,10 @@ class SettingsController extends ChangeNotifier {
 
   bool get localWifiMode => preferences.localWifiMode;
 
+  String get language => preferences.language;
+
+  String get sheetUrl => preferences.sheetUrl;
+
   Future<void> load() async {
     preferences = await _repository.load();
     notifyListeners();
@@ -26,6 +30,19 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setLocalWifiMode(bool value) async {
     preferences = preferences.copyWith(localWifiMode: value);
+    notifyListeners();
+    await _repository.save(preferences);
+  }
+
+  Future<void> setLanguage(String value) async {
+    final language = value == 'hi' || value == 'ar' ? value : 'en';
+    preferences = preferences.copyWith(language: language);
+    notifyListeners();
+    await _repository.save(preferences);
+  }
+
+  Future<void> setSheetUrl(String value) async {
+    preferences = preferences.copyWith(sheetUrl: value.trim());
     notifyListeners();
     await _repository.save(preferences);
   }

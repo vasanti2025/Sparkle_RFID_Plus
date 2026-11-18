@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/stock_report_parse.dart';
 import '../report_chrome.dart';
@@ -54,12 +56,18 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
   @override
   void initState() {
     super.initState();
+    Injection.settings.addListener(_onLanguage);
     _search.addListener(_onSearch);
     unawaited(_load());
   }
 
+  void _onLanguage() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    Injection.settings.removeListener(_onLanguage);
     _debounce?.cancel();
     _exportTimer?.cancel();
     _search.dispose();
@@ -90,7 +98,7 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = AppStrings.reportLoadFailed;
+        _error = tx('reportLoadFailed', AppStrings.reportLoadFailed);
       });
     }
   }
@@ -145,7 +153,7 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
       });
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(AppStrings.reportLoadFailed)));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(tx('reportLoadFailed', AppStrings.reportLoadFailed))));
       }
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -153,20 +161,22 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
   }
 
   String get _countLabel {
-    if (widget.type == 'MATCHED') return AppStrings.matchedItems;
-    if (widget.type == 'UNMATCHED') return AppStrings.unmatchedItems;
-    return AppStrings.totalItems;
+    if (widget.type == 'MATCHED') return tx('matchedItems', AppStrings.matchedItems);
+    if (widget.type == 'UNMATCHED') return tx('unmatchedItems', AppStrings.unmatchedItems);
+    return tx('totalItems', AppStrings.totalItems);
   }
 
   String get _emptyLabel {
-    if (widget.type == 'MATCHED') return AppStrings.noMatchedItems;
-    if (widget.type == 'UNMATCHED') return AppStrings.noUnmatchedItems;
-    return AppStrings.noReportForDate;
+    if (widget.type == 'MATCHED') return tx('noMatchedItems', AppStrings.noMatchedItems);
+    if (widget.type == 'UNMATCHED') return tx('noUnmatchedItems', AppStrings.noUnmatchedItems);
+    return tx('noReportForDate', AppStrings.noReportForDate);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return Directionality(
+      textDirection: featureDirection,
+      child: Scaffold(
       backgroundColor: AppColors.white,
       body: SafeArea(
         child: Stack(
@@ -201,6 +211,7 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
             if (_exported) const Positioned(left: 16, right: 16, bottom: 16, child: ExportBanner()),
           ],
         ),
+      ),
       ),
     );
   }
@@ -350,31 +361,31 @@ class _ItemHead extends StatelessWidget {
           children: [
             SizedBox(
               width: view,
-              child: const Padding(
+              child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: 10),
                 child: Row(
                   children: [
                     _HeadCell('Item', flex: 3),
                     _HeadCell('RFID', flex: 3),
-                    _HeadCell(AppStrings.category, flex: 3),
-                    _HeadCell(AppStrings.product, flex: 3),
-                    _HeadCell(AppStrings.grossWeightShort, flex: 2),
+                    _HeadCell(tx('category', AppStrings.category), flex: 3),
+                    _HeadCell(tx('product', AppStrings.product), flex: 3),
+                    _HeadCell(tx('grossWeightShort', AppStrings.grossWeightShort), flex: 2),
                   ],
                 ),
               ),
             ),
-            const SizedBox(
+            SizedBox(
               width: 96,
               child: Padding(
-                padding: EdgeInsets.only(right: 8),
-                child: Text(AppStrings.netWeightShort, textAlign: TextAlign.right, style: style),
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(tx('netWeightShort', AppStrings.netWeightShort), textAlign: TextAlign.right, style: style),
               ),
             ),
-            const SizedBox(
+            SizedBox(
               width: 96,
               child: Padding(
-                padding: EdgeInsets.only(right: 16),
-                child: Text(AppStrings.itemStatus, textAlign: TextAlign.right, style: style),
+                padding: const EdgeInsets.only(right: 16),
+                child: Text(tx('itemStatus', AppStrings.itemStatus), textAlign: TextAlign.right, style: style),
               ),
             ),
           ],

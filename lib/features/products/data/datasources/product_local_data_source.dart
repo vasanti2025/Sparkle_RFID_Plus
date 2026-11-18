@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../domain/entities/product_sync_progress.dart';
 import '../../domain/entities/stored_record.dart';
+import '../product_csv.dart';
 import '../sync_json_stream.dart';
 
 abstract class ProductLocalDataSource {
@@ -23,6 +24,14 @@ abstract class ProductLocalDataSource {
   });
 
   Future<int> count({String kind = StoredRecord.kindProduct});
+
+  /// Writes synced products as CSV, one page at a time, so a large catalogue
+  /// is not held in memory.
+  Future<int> writeProductCsv(String path, {void Function(int written)? onProgress});
+
+  Future<Map<String, String>> rfidMap();
+
+  Future<int> upsertProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress});
 }
 
 class ProductLocalDataSourceImpl implements ProductLocalDataSource {
@@ -236,6 +245,116 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
       offset: offset,
     );
     return rows.map(_record).toList();
+  }
+
+  @override
+  Future<int> writeProductCsv(String path, {void Function(int written)? onProgress}) async {
+    final database = await _open();
+    final file = File(path);
+    final sink = file.openWrite();
+    var written = 0;
+    try {
+      sink.write('\uFEFF${productCsvHeader.join(',')}\r\n');
+      var offset = 0;
+      const page = 500;
+      while (true) {
+        final rows = await database.query(
+          'synced_records',
+          columns: ['item_code', 'rfid', 'name', 'payload'],
+          where: 'kind = ?',
+          whereArgs: [StoredRecord.kindProduct],
+          orderBy: 'id',
+          limit: page,
+          offset: offset,
+        );
+        if (rows.isEmpty) break;
+        final buffer = StringBuffer();
+        for (final row in rows) {
+          final decoded = jsonDecode(row['payload'] as String? ?? '{}');
+          final payload = decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+          buffer
+            ..write(
+              productCsvFromPayload(
+                payload,
+                itemCode: row['item_code'] as String?,
+                name: row['name'] as String?,
+              ),
+            )
+            ..write('\r\n');
+          written++;
+        }
+        sink.write(buffer);
+        offset += rows.length;
+        onProgress?.call(written);
+        await Future<void>.delayed(Duration.zero);
+        if (rows.length < page) break;
+      }
+      await sink.flush();
+    } catch (_) {
+      await sink.close();
+      if (await file.exists()) await file.delete();
+      rethrow;
+    }
+    await sink.close();
+    return written;
+  }
+
+  @override
+  Future<Map<String, String>> rfidMap() async {
+    final database = await _open();
+    final map = <String, String>{};
+    var offset = 0;
+    const page = 500;
+    while (true) {
+      final rows = await database.query(
+        'synced_records',
+        columns: ['barcode', 'rfid', 'payload'],
+        where: 'kind = ?',
+        whereArgs: [StoredRecord.kindRfid],
+        orderBy: 'id',
+        limit: page,
+        offset: offset,
+      );
+      if (rows.isEmpty) break;
+      for (final row in rows) {
+        final barcode = (row['barcode'] as String? ?? '').trim().toUpperCase();
+        final tid = (row['rfid'] as String? ?? '').trim();
+        if (barcode.isEmpty || tid.isEmpty) continue;
+        map[barcode] = tid;
+      }
+      offset += rows.length;
+      if (rows.length < page) break;
+    }
+    return map;
+  }
+
+  @override
+  Future<int> upsertProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress}) async {
+    if (items.isEmpty) return 0;
+    final database = await _open();
+    var written = 0;
+    const page = 200;
+    for (var start = 0; start < items.length; start += page) {
+      final end = start + page > items.length ? items.length : start + page;
+      final slice = items.sublist(start, end);
+      await database.transaction((txn) async {
+        for (final item in slice) {
+          final code = _text(item, const ['ItemCode', 'itemCode']);
+          if (code != null) {
+            await txn.delete(
+              'synced_records',
+              where: 'kind = ? AND item_code = ?',
+              whereArgs: [StoredRecord.kindProduct, code],
+            );
+          }
+          await txn.insert('synced_records', _row(StoredRecord.kindProduct, item));
+        }
+      });
+      written = end;
+      onProgress?.call(written);
+      await Future<void>.delayed(Duration.zero);
+    }
+    return written;
   }
 
   @override

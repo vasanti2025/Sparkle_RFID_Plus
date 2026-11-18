@@ -42,6 +42,7 @@ class Injection {
   static late final ProductSyncController productSync;
   static late final SearchStoredRecords searchStoredRecords;
   static late final RestoreStoredRecords restoreStoredRecords;
+  static late final ProductRepository productRepository;
 
   static Future<void> init() async {
     final preferences = await SharedPreferences.getInstance();
@@ -76,6 +77,7 @@ class Injection {
       remoteDataSource: ProductRemoteDataSourceImpl(),
       localDataSource: ProductLocalDataSourceImpl(),
     );
+    productRepository = products;
     productSync = ProductSyncController(SyncProducts(products));
     searchStoredRecords = SearchStoredRecords(products);
     restoreStoredRecords = RestoreStoredRecords(products);

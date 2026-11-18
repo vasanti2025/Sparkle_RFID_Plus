@@ -4,10 +4,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/di/injection.dart';
+import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../desktop/presentation/pages/scan_to_desktop_page.dart';
+import '../../data/product_csv.dart';
+import '../import_excel_flow.dart';
 
 import '../demo/product_demo_session.dart';
 
@@ -64,6 +69,7 @@ class _ProductsPageState extends State<ProductsPage> {
   final _rows = <_RowEditors>[];
   var _page = _ProductPage.list;
   var _capturing = false;
+  var _exporting = false;
   var _suspend = false;
   String? _error;
   Timer? _timer;
@@ -95,6 +101,7 @@ class _ProductsPageState extends State<ProductsPage> {
       _session.query = _query.text;
       if (_page == _ProductPage.list) setState(() {});
     });
+    Injection.settings.addListener(_onLanguage);
     for (final key in _singleKeys) {
       final controller = TextEditingController();
       controller.addListener(() {
@@ -106,8 +113,13 @@ class _ProductsPageState extends State<ProductsPage> {
     }
   }
 
+  void _onLanguage() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    Injection.settings.removeListener(_onLanguage);
     _suspend = true;
     _timer?.cancel();
     if (_session.syncPhase == 'running') _session.syncPhase = 'paused';
@@ -403,41 +415,129 @@ class _ProductsPageState extends State<ProductsPage> {
     });
   }
 
-  Future<void> _downloadCsv() async {
-    final rows = <List<String>>[
-      [
-        AppStrings.itemCode,
-        AppStrings.product,
-        AppStrings.rfidCode,
-        AppStrings.epc,
-        'Gross g',
-        'Net g',
-      ],
-      for (final item in _session.visible)
-        [
-          item.id,
-          item.name,
-          item.rfid,
-          item.epc,
-          item.grossMg == null ? '' : (item.grossMg! / 1000).toString(),
-          item.netMg == null ? '' : (item.netMg! / 1000).toString(),
-        ],
-    ];
-    final csv = rows.map((row) => row.map(_csv).join(',')).join('\r\n');
+  Future<void> _exportProducts(String mode) async {
+    if (_exporting) return;
+    _exporting = true;
+    final progress = ValueNotifier<int>(0);
+    if (!mounted) return;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: ValueListenableBuilder<int>(
+              valueListenable: progress,
+              builder: (context, written, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(color: _ink),
+                  const SizedBox(height: 16),
+                  Text(
+                    written == 0 ? AppStrings.exportingProducts : '${AppStrings.exportingProducts} $written',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    var closed = false;
+    void closeDialog() {
+      if (closed || !mounted) return;
+      closed = true;
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/SPARKLE_Demo_Products.csv');
-      await file.writeAsString('\uFEFF$csv');
-      if (mounted) _toast(AppStrings.demoCsvSaved);
+      await Future<void>.delayed(Duration.zero);
+      final directory = mode == 'device'
+          ? (await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory())
+          : await getTemporaryDirectory();
+      final path = '${directory.path}${Platform.pathSeparator}all_items.csv';
+      final stored = Injection.ready ? await Injection.productRepository.storedCount() : 0;
+      final count = stored > 0
+          ? await Injection.productRepository.exportStoredCsv(path, onProgress: (written) => progress.value = written)
+          : await _writeSessionCsv(path, progress);
+      closeDialog();
+      if (!mounted) return;
+      if (count == 0) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+        if (mounted) _toast(AppStrings.noProductsToExport);
+        return;
+      }
+      if (mode == 'mail') {
+        await Share.shareXFiles(
+          [XFile(path, mimeType: 'text/csv', name: 'all_items.csv')],
+          subject: AppStrings.exportProducts,
+        );
+      } else if (mounted) {
+        _toast('${AppStrings.productCsvSaved}: $path');
+      }
     } catch (_) {
-      if (mounted) _toast(AppStrings.cacheError);
+      closeDialog();
+      if (mounted) _toast(AppStrings.productExportFailed);
+    } finally {
+      _exporting = false;
+      Future<void>.delayed(const Duration(milliseconds: 300), progress.dispose);
     }
   }
 
-  String _csv(String value) {
-    var safe = value;
-    if (RegExp(r'^[\s]*[=+\-@]').hasMatch(safe)) safe = "'$safe";
-    return '"${safe.replaceAll('"', '""')}"';
+  Future<int> _writeSessionCsv(String path, ValueNotifier<int> progress) async {
+    final file = File(path);
+    final sink = file.openWrite();
+    var written = 0;
+    try {
+      sink.write('\uFEFF${productCsvHeader.join(',')}\r\n');
+      for (final item in _session.items) {
+        sink
+          ..write(
+            productCsvLine([
+              item.category,
+              item.name,
+              item.design,
+              item.id,
+              item.rfid,
+              item.grossMg == null ? '' : (item.grossMg! / 1000).toString(),
+              '',
+              '',
+              item.netMg == null ? '' : (item.netMg! / 1000).toString(),
+              item.purity,
+              '',
+              '',
+              '',
+              '',
+              '',
+              '',
+              item.sku,
+              item.epc,
+              item.vendor,
+              '',
+              '',
+              '',
+              '',
+            ]),
+          )
+          ..write('\r\n');
+        written++;
+        if (written % 500 == 0) {
+          progress.value = written;
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+      await sink.flush();
+    } catch (_) {
+      await sink.close();
+      if (await file.exists()) await file.delete();
+      rethrow;
+    }
+    await sink.close();
+    progress.value = written;
+    return written;
   }
 
   void _runSync(String id, {bool resume = false}) {
@@ -601,7 +701,7 @@ class _ProductsPageState extends State<ProductsPage> {
                   const SizedBox(width: 8),
                   _toolButton(
                     icon: Icons.swap_vert,
-                    label: AppStrings.dataTools,
+                    label: tx('dataTools', AppStrings.dataTools),
                     onPressed: _dataTools,
                   ),
                 ],
@@ -1089,7 +1189,9 @@ class _ProductsPageState extends State<ProductsPage> {
       isScrollControlled: true,
       backgroundColor: _surface,
       builder: (context) {
-        return Padding(
+        return Directionality(
+          textDirection: featureDirection,
+          child: Padding(
           padding: EdgeInsets.fromLTRB(
             20,
             16,
@@ -1106,6 +1208,7 @@ class _ProductsPageState extends State<ProductsPage> {
               ],
             ),
           ),
+        ),
         );
       },
     );
@@ -1164,11 +1267,11 @@ class _ProductsPageState extends State<ProductsPage> {
   }
 
   void _dataTools() {
-    _sheet(AppStrings.productDataTools, [
+    _sheet(tx('productDataTools', AppStrings.productDataTools), [
       _choice(
         icon: Icons.sync,
-        title: AppStrings.syncCentre,
-        subtitle: AppStrings.dataSyncSubtitle,
+        title: tx('syncCentre', AppStrings.syncCentre),
+        subtitle: tx('dataSyncSubtitle', AppStrings.dataSyncSubtitle),
         onTap: () {
           Navigator.pop(context);
           _pauseSync();
@@ -1177,17 +1280,26 @@ class _ProductsPageState extends State<ProductsPage> {
       ),
       _choice(
         icon: Icons.table_chart_outlined,
-        title: AppStrings.importExcel,
-        subtitle: AppStrings.importExcelHint,
+        title: tx('importExcel', AppStrings.importExcel),
+        subtitle: tx('importExcelHint', AppStrings.importExcelHint),
         onTap: () {
           Navigator.pop(context);
-          _importSheet();
+          unawaited(ImportExcelFlow.start(context));
+        },
+      ),
+      _choice(
+        icon: Icons.grid_on_outlined,
+        title: tx('syncSheetData', 'Sync Sheet data'),
+        subtitle: tx('syncSheetHint', 'Use the same column mapping from a Google Sheet.'),
+        onTap: () {
+          Navigator.pop(context);
+          unawaited(ImportExcelFlow.startSheet(context));
         },
       ),
       _choice(
         icon: Icons.download_outlined,
-        title: AppStrings.exportExcel,
-        subtitle: AppStrings.csvHint,
+        title: tx('exportExcel', AppStrings.exportExcel),
+        subtitle: tx('csvHint', AppStrings.csvHint),
         onTap: () {
           Navigator.pop(context);
           _exportSheet();
@@ -1195,8 +1307,8 @@ class _ProductsPageState extends State<ProductsPage> {
       ),
       _choice(
         icon: Icons.desktop_windows_outlined,
-        title: AppStrings.scanToDesktop,
-        subtitle: AppStrings.desktopNote,
+        title: tx('scanToDesktop', AppStrings.scanToDesktop),
+        subtitle: tx('desktopNote', AppStrings.desktopNote),
         onTap: () {
           Navigator.pop(context);
           Navigator.of(context).push(
@@ -1547,28 +1659,48 @@ class _ProductsPageState extends State<ProductsPage> {
     ]);
   }
 
-  void _exportSheet() {
-    _sheet(AppStrings.exportProducts, [
+  Future<void> _exportSheet() async {
+    final stored = Injection.ready ? await Injection.productRepository.storedCount() : 0;
+    if (!mounted) return;
+    final total = stored > 0 ? stored : _session.items.length;
+    _sheet(tx('exportProducts', AppStrings.exportProducts), [
       Text(
-        '${AppStrings.exportProducts} (${_session.visible.length}).',
+        '$total ${tx('productRecords', AppStrings.productRecords)}',
         style: _text(size: 14, color: AppColors.muted),
       ),
-      _summaryLine(AppStrings.productionFormat, AppStrings.excel),
+      const SizedBox(height: 8),
+      Text(tx('csvHint', AppStrings.csvHint), style: _text(size: 12, color: AppColors.muted, height: 1.35)),
       const SizedBox(height: 12),
       FilledButton.icon(
-        onPressed: () {
-          Navigator.pop(context);
-          _downloadCsv();
-        },
+        onPressed: _exporting
+            ? null
+            : () {
+                Navigator.pop(context);
+                unawaited(_exportProducts('mail'));
+              },
         style: FilledButton.styleFrom(
           backgroundColor: _ink,
           minimumSize: const Size.fromHeight(48),
         ),
-        icon: const Icon(Icons.download_outlined),
-        label: const Text(AppStrings.downloadDemoCsv),
+        icon: const Icon(Icons.mail_outline),
+        label: Text(tx('mailExport', AppStrings.mailExport)),
       ),
       const SizedBox(height: 8),
-      Text(AppStrings.csvHint, style: _text(size: 12, color: AppColors.muted, height: 1.35)),
+      OutlinedButton.icon(
+        onPressed: _exporting
+            ? null
+            : () {
+                Navigator.pop(context);
+                unawaited(_exportProducts('device'));
+              },
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _ink,
+          minimumSize: const Size.fromHeight(48),
+          side: const BorderSide(color: _ink),
+        ),
+        icon: const Icon(Icons.download_outlined),
+        label: Text(tx('saveOnDevice', AppStrings.saveOnDevice)),
+      ),
     ]);
   }
 
