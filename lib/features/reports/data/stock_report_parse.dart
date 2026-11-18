@@ -41,6 +41,26 @@ class BranchSummary {
   final int unmatched;
 }
 
+/// One level of the consolidated tree: branch, category, product, or design.
+/// Child lists are counts only. Item rows stay out of this object.
+class ReportTreeNode {
+  const ReportTreeNode({
+    required this.id,
+    required this.name,
+    required this.total,
+    required this.matched,
+    required this.unmatched,
+    this.children = const [],
+  });
+
+  final int id;
+  final String name;
+  final int total;
+  final int matched;
+  final int unmatched;
+  final List<ReportTreeNode> children;
+}
+
 class ItemRow {
   const ItemRow({
     required this.item,
@@ -240,6 +260,56 @@ List<BranchSummary> parseBranchSummaries(String body) {
   return summaries;
 }
 
+List<ReportTreeNode> parseReportTree(String body) {
+  try {
+    final scanned = _scanReportTree(body);
+    if (scanned != null) return scanned;
+  } catch (_) {}
+  return _treeFromDecoded(decodeReportBody(body));
+}
+
+List<ReportTreeNode> _treeFromDecoded(dynamic decoded) {
+  final nodes = <ReportTreeNode>[];
+  for (final entry in _branchList(decoded)) {
+    final map = _map(entry);
+    if (map == null) continue;
+    final node = _treeNode(map, 0);
+    if (node != null) nodes.add(node);
+  }
+  return nodes;
+}
+
+ReportTreeNode? _treeNode(Map<String, dynamic> map, int level) {
+  const ids = ['BranchId', 'CategoryId', 'ProductId', 'DesignId'];
+  const names = ['BranchName', 'CategoryName', 'ProductName', 'DesignName'];
+  const childKeys = ['Categories', 'Products', 'Designs'];
+  final id = reportInt(map[ids[level]] ?? map[ids[level].toLowerCase()]);
+  final name = reportText(map[names[level]] ?? map[names[level].toLowerCase()]);
+  final children = <ReportTreeNode>[];
+  if (level < 3) {
+    final raw = _unwrap(map[childKeys[level]] ?? map[childKeys[level].toLowerCase()]);
+    if (raw is List) {
+      for (final entry in raw) {
+        final child = _map(entry);
+        if (child == null) continue;
+        final node = _treeNode(child, level + 1);
+        if (node != null) children.add(node);
+      }
+    }
+  }
+  if (id == 0 && name.isEmpty && children.isEmpty && !map.containsKey('TotalInventoryItems') && !map.containsKey('totalInventoryItems')) {
+    return null;
+  }
+  return ReportTreeNode(
+    id: id,
+    name: name,
+    total: reportInt(map['TotalInventoryItems'] ?? map['totalInventoryItems']),
+    matched: reportInt(map['TotalScannedItems'] ?? map['totalScannedItems']),
+    unmatched: reportInt(map['NotScannedItems'] ?? map['notScannedItems']),
+    children: children,
+  );
+}
+
 List<dynamic> _branchList(dynamic decoded) {
   final map = _map(_unwrap(decoded));
   if (map == null) return const [];
@@ -258,9 +328,12 @@ List<ItemRow> extractBranchItems(Map<String, Object?> args) {
   final branchId = args['branchId'] as int? ?? 0;
   final branchName = (args['branchName'] as String? ?? '').trim();
   final type = ((args['type'] as String?) ?? 'TOTAL').toUpperCase();
+  final categoryId = args['categoryId'] as int? ?? 0;
+  final productId = args['productId'] as int? ?? 0;
+  final designId = args['designId'] as int? ?? 0;
   try {
-    final scanned = _scanBranchItems(body, branchId, branchName, type);
-    if (scanned.isNotEmpty) return scanned;
+    final scanned = _scanBranchItems(body, branchId, branchName, type, categoryId, productId, designId);
+    if (scanned != null) return scanned;
   } catch (_) {}
   final decoded = decodeReportBody(body);
   final rows = <ItemRow>[];
@@ -272,16 +345,19 @@ List<ItemRow> extractBranchItems(Map<String, Object?> args) {
     for (final categoryEntry in categories) {
       final category = _map(categoryEntry);
       if (category == null) continue;
+      if (categoryId > 0 && reportInt(category['CategoryId'] ?? category['categoryId']) != categoryId) continue;
       final products = _unwrap(category['Products'] ?? category['products']);
       if (products is! List) continue;
       for (final productEntry in products) {
         final product = _map(productEntry);
         if (product == null) continue;
+        if (productId > 0 && reportInt(product['ProductId'] ?? product['productId']) != productId) continue;
         final designs = _unwrap(product['Designs'] ?? product['designs']);
         if (designs is! List) continue;
         for (final designEntry in designs) {
           final design = _map(designEntry);
           if (design == null) continue;
+          if (designId > 0 && reportInt(design['DesignId'] ?? design['designId']) != designId) continue;
           final items = _unwrap(design['Items'] ?? design['items']);
           if (items is! List) continue;
           for (final itemEntry in items) {
@@ -496,15 +572,41 @@ List<BranchSummary> _scanBranchSummaries(String body) {
   return branches;
 }
 
-List<ItemRow> _scanBranchItems(String body, int branchId, String branchName, String type) {
+List<ReportTreeNode>? _scanReportTree(String body) {
   final scan = _Scan(body);
-  final rows = <ItemRow>[];
+  final branches = <ReportTreeNode>[];
+  var saw = false;
   scan.walk((key, read) {
     if (key != 'branches') return false;
-    scan.readArray(() => scan.readBranchItems(rows, branchId, branchName, type));
+    saw = true;
+    scan.readArray(() {
+      final node = scan.readLevel(0);
+      if (node != null) branches.add(node);
+    });
     return true;
   }, 0);
-  return rows;
+  return saw ? branches : null;
+}
+
+List<ItemRow>? _scanBranchItems(
+  String body,
+  int branchId,
+  String branchName,
+  String type,
+  int categoryId,
+  int productId,
+  int designId,
+) {
+  final scan = _Scan(body);
+  final rows = <ItemRow>[];
+  var saw = false;
+  scan.walk((key, read) {
+    if (key != 'branches') return false;
+    saw = true;
+    scan.readArray(() => scan.readBranchItems(rows, branchId, branchName, type, categoryId, productId, designId));
+    return true;
+  }, 0);
+  return saw ? rows : null;
 }
 
 class _Scan {
@@ -602,7 +704,81 @@ class _Scan {
     return values;
   }
 
-  void readBranchItems(List<ItemRow> rows, int branchId, String branchName, String type) {
+  ReportTreeNode? readLevel(int level) {
+    ws();
+    if (i >= n || s.codeUnitAt(i) != 123) {
+      skipValue();
+      return null;
+    }
+    i++;
+    const idKeys = ['branchid', 'categoryid', 'productid', 'designid'];
+    const nameKeys = ['branchname', 'categoryname', 'productname', 'designname'];
+    const childKeys = ['categories', 'products', 'designs', ''];
+    final idKey = idKeys[level];
+    final nameKey = nameKeys[level];
+    final childKey = childKeys[level];
+    var id = 0;
+    var name = '';
+    var total = 0;
+    var matched = 0;
+    var unmatched = 0;
+    var sawCount = false;
+    final children = <ReportTreeNode>[];
+    while (i < n) {
+      ws();
+      if (i < n && s.codeUnitAt(i) == 125) {
+        i++;
+        break;
+      }
+      final mark = i;
+      final key = (readString() ?? '').toLowerCase();
+      ws();
+      if (i < n && s.codeUnitAt(i) == 58) i++;
+      if (key == idKey) {
+        id = reportInt(readScalar());
+      } else if (key == nameKey) {
+        name = readScalar();
+      } else if (key == 'totalinventoryitems') {
+        total = reportInt(readScalar());
+        sawCount = true;
+      } else if (key == 'totalscanneditems') {
+        matched = reportInt(readScalar());
+        sawCount = true;
+      } else if (key == 'notscanneditems') {
+        unmatched = reportInt(readScalar());
+        sawCount = true;
+      } else if (childKey.isNotEmpty && key == childKey) {
+        readArray(() {
+          final child = readLevel(level + 1);
+          if (child != null) children.add(child);
+        });
+      } else {
+        skipValue();
+      }
+      if (i == mark) i++;
+      ws();
+      if (i < n && s.codeUnitAt(i) == 44) i++;
+    }
+    if (id == 0 && name.isEmpty && children.isEmpty && !sawCount) return null;
+    return ReportTreeNode(
+      id: id,
+      name: name,
+      total: total,
+      matched: matched,
+      unmatched: unmatched,
+      children: children,
+    );
+  }
+
+  void readBranchItems(
+    List<ItemRow> rows,
+    int branchId,
+    String branchName,
+    String type,
+    int categoryId,
+    int productId,
+    int designId,
+  ) {
     ws();
     if (i >= n || s.codeUnitAt(i) != 123) {
       skipValue();
@@ -632,7 +808,7 @@ class _Scan {
         name = readScalar();
         sawName = true;
       } else if (key == 'categories' && matches) {
-        _readCategories(rows, type);
+        _readCategories(rows, type, categoryId, productId, designId);
       } else {
         skipValue();
       }
@@ -644,7 +820,7 @@ class _Scan {
     if (!keep && rows.length > start) rows.removeRange(start, rows.length);
   }
 
-  void _readCategories(List<ItemRow> rows, String type) {
+  void _readCategories(List<ItemRow> rows, String type, int categoryId, int productId, int designId) {
     readArray(() {
       ws();
       if (i >= n || s.codeUnitAt(i) != 123) {
@@ -652,30 +828,40 @@ class _Scan {
         return;
       }
       i++;
+      var id = 0;
+      var sawId = false;
       var category = '';
+      final start = rows.length;
       while (i < n) {
         ws();
         if (i < n && s.codeUnitAt(i) == 125) {
           i++;
           break;
         }
+        final mark = i;
         final key = (readString() ?? '').toLowerCase();
         ws();
         if (i < n && s.codeUnitAt(i) == 58) i++;
-        if (key == 'categoryname') {
+        final skip = categoryId > 0 && sawId && id != categoryId;
+        if (key == 'categoryid') {
+          id = reportInt(readScalar());
+          sawId = true;
+        } else if (key == 'categoryname') {
           category = readScalar();
-        } else if (key == 'products') {
-          _readProducts(rows, category, type);
+        } else if (key == 'products' && !skip) {
+          _readProducts(rows, category, type, productId, designId);
         } else {
           skipValue();
         }
+        if (i == mark) i++;
         ws();
         if (i < n && s.codeUnitAt(i) == 44) i++;
       }
+      if (categoryId > 0 && id != categoryId && rows.length > start) rows.removeRange(start, rows.length);
     });
   }
 
-  void _readProducts(List<ItemRow> rows, String category, String type) {
+  void _readProducts(List<ItemRow> rows, String category, String type, int productId, int designId) {
     readArray(() {
       ws();
       if (i >= n || s.codeUnitAt(i) != 123) {
@@ -683,30 +869,40 @@ class _Scan {
         return;
       }
       i++;
+      var id = 0;
+      var sawId = false;
       var product = '';
+      final start = rows.length;
       while (i < n) {
         ws();
         if (i < n && s.codeUnitAt(i) == 125) {
           i++;
           break;
         }
+        final mark = i;
         final key = (readString() ?? '').toLowerCase();
         ws();
         if (i < n && s.codeUnitAt(i) == 58) i++;
-        if (key == 'productname') {
+        final skip = productId > 0 && sawId && id != productId;
+        if (key == 'productid') {
+          id = reportInt(readScalar());
+          sawId = true;
+        } else if (key == 'productname') {
           product = readScalar();
-        } else if (key == 'designs') {
-          _readDesigns(rows, category, product, type);
+        } else if (key == 'designs' && !skip) {
+          _readDesigns(rows, category, product, type, designId);
         } else {
           skipValue();
         }
+        if (i == mark) i++;
         ws();
         if (i < n && s.codeUnitAt(i) == 44) i++;
       }
+      if (productId > 0 && id != productId && rows.length > start) rows.removeRange(start, rows.length);
     });
   }
 
-  void _readDesigns(List<ItemRow> rows, String category, String product, String type) {
+  void _readDesigns(List<ItemRow> rows, String category, String product, String type, int designId) {
     readArray(() {
       ws();
       if (i >= n || s.codeUnitAt(i) != 123) {
@@ -714,23 +910,33 @@ class _Scan {
         return;
       }
       i++;
+      var id = 0;
+      var sawId = false;
+      final start = rows.length;
       while (i < n) {
         ws();
         if (i < n && s.codeUnitAt(i) == 125) {
           i++;
           break;
         }
+        final mark = i;
         final key = (readString() ?? '').toLowerCase();
         ws();
         if (i < n && s.codeUnitAt(i) == 58) i++;
-        if (key == 'items') {
+        final skip = designId > 0 && sawId && id != designId;
+        if (key == 'designid') {
+          id = reportInt(readScalar());
+          sawId = true;
+        } else if (key == 'items' && !skip) {
           _readItems(rows, category, product, type);
         } else {
           skipValue();
         }
+        if (i == mark) i++;
         ws();
         if (i < n && s.codeUnitAt(i) == 44) i++;
       }
+      if (designId > 0 && id != designId && rows.length > start) rows.removeRange(start, rows.length);
     });
   }
 

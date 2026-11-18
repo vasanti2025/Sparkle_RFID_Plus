@@ -44,6 +44,49 @@ void main() {
     expect(rows.first.unmatchQty, 20);
   });
 
+  test('tree keeps category product design and skips items', () {
+    final body = '''
+{"Branches":[{"BranchId":2,"BranchName":"Pune","TotalInventoryItems":3,"TotalScannedItems":1,"NotScannedItems":2,"Categories":[
+ {"CategoryId":8,"CategoryName":"Gold","TotalInventoryItems":2,"TotalScannedItems":1,"NotScannedItems":1,"Products":[
+  {"ProductId":4,"ProductName":"Ring","TotalInventoryItems":2,"TotalScannedItems":1,"NotScannedItems":1,"Designs":[
+   {"DesignId":6,"DesignName":"Classic","TotalInventoryItems":2,"TotalScannedItems":1,"NotScannedItems":1,"Items":[{"ItemCode":"A","Status":"Matched"},{"ItemCode":"B","Status":"Unmatched"}]}
+  ]}
+ ]},
+ {"CategoryId":9,"CategoryName":"Tops","TotalInventoryItems":1,"TotalScannedItems":0,"NotScannedItems":1,"Products":[
+  {"ProductId":5,"ProductName":"Chain","TotalInventoryItems":1,"TotalScannedItems":0,"NotScannedItems":1,"Designs":[
+   {"DesignId":7,"DesignName":"Light","TotalInventoryItems":1,"TotalScannedItems":0,"NotScannedItems":1,"Items":[{"ItemCode":"C","Status":"Unmatched"}]}
+  ]}
+ ]}
+]}]}
+''';
+    final tree = parseReportTree(body);
+    expect(tree, hasLength(1));
+    expect(tree.first.children, hasLength(2));
+    expect(tree.first.children.first.name, 'Gold');
+    expect(tree.first.children.first.children.single.name, 'Ring');
+    expect(tree.first.children.first.children.single.children.single.name, 'Classic');
+    final matched = extractBranchItems({
+      'body': body,
+      'branchId': 2,
+      'branchName': 'Pune',
+      'categoryId': 8,
+      'productId': 4,
+      'designId': 6,
+      'type': 'MATCHED',
+    });
+    expect(matched, hasLength(1));
+    expect(matched.single.item, 'A');
+    final unmatched = extractBranchItems({
+      'body': body,
+      'branchId': 2,
+      'branchName': 'Pune',
+      'categoryId': 9,
+      'type': 'UNMATCHED',
+    });
+    expect(unmatched, hasLength(1));
+    expect(unmatched.single.item, 'C');
+  });
+
   test('10k item scan stays quick', () {
     final items = StringBuffer();
     for (var i = 0; i < 10000; i++) {

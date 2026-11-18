@@ -280,7 +280,7 @@ class _BatchHead extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(color: AppColors.muted, fontSize: 11, fontWeight: FontWeight.w600);
+    const style = TextStyle(color: AppColors.charcoal, fontSize: 11, fontWeight: FontWeight.w700);
     return const ColoredBox(
       color: reportCanvas,
       child: Padding(

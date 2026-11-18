@@ -27,7 +27,8 @@ class _StockReportPageState extends State<StockReportPage> {
   final _sessions = <ReportSession>[];
   final _visible = <ReportSession>[];
   final _branches = <({int id, String name})>[];
-  final _summaries = <BranchSummary>[];
+  final _tree = <ReportTreeNode>[];
+  final _open = <String>{};
 
   var _batchMode = true;
   var _loadingSessions = false;
@@ -117,13 +118,14 @@ class _StockReportPageState extends State<StockReportPage> {
     });
     try {
       final body = await _api.consolidated(clientCode: code, reportDate: date);
-      final summaries = body.trim().isEmpty ? const <BranchSummary>[] : await readReport(body, parseBranchSummaries);
+      final tree = body.trim().isEmpty ? const <ReportTreeNode>[] : await readReport(body, parseReportTree);
       if (!mounted) return;
       setState(() {
         _consolidatedBody = body;
-        _summaries
+        _open.clear();
+        _tree
           ..clear()
-          ..addAll(summaries);
+          ..addAll(tree);
         _reportReady = true;
       });
     } catch (_) {
@@ -375,7 +377,7 @@ class _StockReportPageState extends State<StockReportPage> {
   static const _batchExtraWidth = 160.0;
 
   Widget _batchHead(double view) {
-    const style = TextStyle(color: AppColors.muted, fontSize: 12);
+    const style = TextStyle(color: AppColors.charcoal, fontSize: 12, fontWeight: FontWeight.w700);
     return ColoredBox(
       color: reportCanvas,
       child: SizedBox(
@@ -411,45 +413,104 @@ class _StockReportPageState extends State<StockReportPage> {
   }
 
   Widget _summaryList() {
-    if (_reportError != null && _summaries.isEmpty) return _message(_reportError!, retry: _loadConsolidated);
-    if (_loadingReport && _summaries.isEmpty) return const Center(child: CircularProgressIndicator(color: AppColors.charcoal));
-    if (_reportReady && _summaries.isEmpty) return _message(AppStrings.noReportForDate, retry: _loadConsolidated);
+    if (_reportError != null && _tree.isEmpty) return _message(_reportError!, retry: _loadConsolidated);
+    if (_loadingReport && _tree.isEmpty) return const Center(child: CircularProgressIndicator(color: AppColors.charcoal));
+    if (_reportReady && _tree.isEmpty) return _message(AppStrings.noReportForDate, retry: _loadConsolidated);
+    final lines = _treeLines();
     return Column(
       children: [
         _summaryHead(),
         Expanded(
           child: ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      itemCount: _summaries.length,
-      itemBuilder: (context, index) {
-        final branch = _summaries[index];
-        return _SummaryTile(
-          branch: branch,
-          onTap: () {
-            final body = _consolidatedBody;
-            if (body == null || body.isEmpty) return;
-            Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => StockReportItemsPage(
-                  title: branch.name.isEmpty ? AppStrings.branch : branch.name,
-                  dateLabel: reportDayLabel(_reportDate),
-                  body: body,
-                  branchId: branch.id,
-                  branchName: branch.name,
-                ),
-              ),
-            );
-          },
-        );
-      },
-    ),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            itemCount: lines.length,
+            itemBuilder: (context, index) {
+              final line = lines[index];
+              return _SummaryTile(
+                line: line,
+                open: _open.contains(line.key),
+                onToggle: line.node.children.isEmpty
+                    ? null
+                    : () => setState(() {
+                          if (!_open.add(line.key)) _open.remove(line.key);
+                        }),
+                onCount: (type) => _openItems(line, type),
+              );
+            },
+          ),
         ),
       ],
     );
   }
 
+  void _openItems(_TreeLine line, String type) {
+    final body = _consolidatedBody;
+    if (body == null || body.isEmpty) return;
+    final title = line.node.name.isEmpty ? AppStrings.branch : line.node.name;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => StockReportItemsPage(
+          title: title,
+          dateLabel: reportDayLabel(_reportDate),
+          body: body,
+          branchId: line.branchId,
+          branchName: line.branchName,
+          categoryId: line.categoryId,
+          productId: line.productId,
+          designId: line.designId,
+          type: type,
+        ),
+      ),
+    );
+  }
+
+  List<_TreeLine> _treeLines() {
+    final lines = <_TreeLine>[];
+    void add(
+      ReportTreeNode node,
+      int depth,
+      int branchId,
+      String branchName,
+      int categoryId,
+      int productId,
+      int designId,
+      String key,
+    ) {
+      lines.add(
+        _TreeLine(
+          key: key,
+          node: node,
+          depth: depth,
+          branchId: branchId,
+          branchName: branchName,
+          categoryId: categoryId,
+          productId: productId,
+          designId: designId,
+        ),
+      );
+      if (!_open.contains(key)) return;
+      for (var index = 0; index < node.children.length; index++) {
+        final child = node.children[index];
+        final childKey = '$key/$index';
+        if (depth == 0) {
+          add(child, 1, node.id, node.name, child.id, 0, 0, childKey);
+        } else if (depth == 1) {
+          add(child, 2, branchId, branchName, categoryId, child.id, 0, childKey);
+        } else if (depth == 2) {
+          add(child, 3, branchId, branchName, categoryId, productId, child.id, childKey);
+        }
+      }
+    }
+
+    for (var index = 0; index < _tree.length; index++) {
+      final branch = _tree[index];
+      add(branch, 0, branch.id, branch.name, 0, 0, 0, 'b$index');
+    }
+    return lines;
+  }
+
   Widget _summaryHead() {
-    const style = TextStyle(color: AppColors.muted, fontSize: 12);
+    const style = TextStyle(color: AppColors.charcoal, fontSize: 12, fontWeight: FontWeight.w700);
     return const ColoredBox(
       color: reportCanvas,
       child: Padding(
@@ -498,13 +559,13 @@ class _BatchTile extends StatelessWidget {
             SizedBox(width: viewWidth, child: _visible()),
             SizedBox(
               width: 72,
-              child: Text('${session.matchQty}', textAlign: TextAlign.right, style: const TextStyle(color: reportMatchedText, fontWeight: FontWeight.w700, fontSize: 14)),
+              child: Text('${session.matchQty}', textAlign: TextAlign.right, style: const TextStyle(color: reportMatchedText, fontWeight: FontWeight.w700, fontSize: 12)),
             ),
             SizedBox(
               width: 88,
               child: Padding(
                 padding: const EdgeInsets.only(right: 16),
-                child: Text('${session.unmatchQty}', textAlign: TextAlign.right, style: const TextStyle(color: reportUnmatchedText, fontWeight: FontWeight.w700, fontSize: 14)),
+                child: Text('${session.unmatchQty}', textAlign: TextAlign.right, style: const TextStyle(color: reportUnmatchedText, fontWeight: FontWeight.w700, fontSize: 12)),
               ),
             ),
           ],
@@ -524,7 +585,7 @@ class _BatchTile extends StatelessWidget {
               session.branchName.isEmpty ? '—' : session.branchName,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 13),
+              style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 12),
             ),
           ),
           Expanded(
@@ -542,7 +603,7 @@ class _BatchTile extends StatelessWidget {
             child: Text(
               '${session.totalQty}',
               textAlign: TextAlign.right,
-              style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 16),
+              style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 12),
             ),
           ),
         ],
@@ -551,36 +612,89 @@ class _BatchTile extends StatelessWidget {
   }
 }
 
-class _SummaryTile extends StatelessWidget {
-  const _SummaryTile({required this.branch, required this.onTap});
+class _TreeLine {
+  const _TreeLine({
+    required this.key,
+    required this.node,
+    required this.depth,
+    required this.branchId,
+    required this.branchName,
+    required this.categoryId,
+    required this.productId,
+    required this.designId,
+  });
 
-  final BranchSummary branch;
-  final VoidCallback onTap;
+  final String key;
+  final ReportTreeNode node;
+  final int depth;
+  final int branchId;
+  final String branchName;
+  final int categoryId;
+  final int productId;
+  final int designId;
+}
+
+class _SummaryTile extends StatelessWidget {
+  const _SummaryTile({required this.line, required this.open, required this.onToggle, required this.onCount});
+
+  final _TreeLine line;
+  final bool open;
+  final VoidCallback? onToggle;
+  final ValueChanged<String> onCount;
 
   @override
   Widget build(BuildContext context) {
-    const number = TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w600, fontSize: 13);
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: reportLine))),
-        child: Row(
-          children: [
-            Expanded(
-              flex: 4,
-              child: Text(
-                branch.name.isEmpty ? '—' : branch.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 14),
+    const number = TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 12);
+    final node = line.node;
+    const nameStyle = TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 12);
+    return Container(
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: reportLine))),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: InkWell(
+              onTap: onToggle,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(line.depth * 14, 14, 0, 14),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      child: Icon(
+                        onToggle == null ? Icons.circle : (open ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right),
+                        size: onToggle == null ? 6 : 18,
+                        color: onToggle == null ? AppColors.muted : AppColors.charcoal,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        node.name.isEmpty ? '—' : node.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: nameStyle,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            Expanded(flex: 2, child: Text('${branch.total}', textAlign: TextAlign.right, style: number)),
-            Expanded(flex: 2, child: Text('${branch.matched}', textAlign: TextAlign.right, style: number)),
-            Expanded(flex: 3, child: Text('${branch.unmatched}', textAlign: TextAlign.right, style: number)),
-          ],
-        ),
+          ),
+          Expanded(flex: 2, child: _count('${node.total}', () => onCount('TOTAL'), number)),
+          Expanded(flex: 2, child: _count('${node.matched}', () => onCount('MATCHED'), number)),
+          Expanded(flex: 3, child: _count('${node.unmatched}', () => onCount('UNMATCHED'), number)),
+        ],
+      ),
+    );
+  }
+
+  Widget _count(String text, VoidCallback onTap, TextStyle style) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Text(text, textAlign: TextAlign.right, style: style),
       ),
     );
   }

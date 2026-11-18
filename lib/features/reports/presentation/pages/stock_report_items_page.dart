@@ -17,6 +17,10 @@ class StockReportItemsPage extends StatefulWidget {
     required this.body,
     required this.branchId,
     required this.branchName,
+    this.categoryId = 0,
+    this.productId = 0,
+    this.designId = 0,
+    this.type = 'TOTAL',
     super.key,
   });
 
@@ -25,6 +29,10 @@ class StockReportItemsPage extends StatefulWidget {
   final String body;
   final int branchId;
   final String branchName;
+  final int categoryId;
+  final int productId;
+  final int designId;
+  final String type;
 
   @override
   State<StockReportItemsPage> createState() => _StockReportItemsPageState();
@@ -64,7 +72,10 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
         'body': widget.body,
         'branchId': widget.branchId,
         'branchName': widget.branchName,
-        'type': 'TOTAL',
+        'categoryId': widget.categoryId,
+        'productId': widget.productId,
+        'designId': widget.designId,
+        'type': widget.type,
       };
       final rows = widget.body.length <= 1800000 ? extractBranchItems(args) : await compute(extractBranchItems, args);
       if (!mounted) return;
@@ -141,6 +152,18 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
     }
   }
 
+  String get _countLabel {
+    if (widget.type == 'MATCHED') return AppStrings.matchedItems;
+    if (widget.type == 'UNMATCHED') return AppStrings.unmatchedItems;
+    return AppStrings.totalItems;
+  }
+
+  String get _emptyLabel {
+    if (widget.type == 'MATCHED') return AppStrings.noMatchedItems;
+    if (widget.type == 'UNMATCHED') return AppStrings.noUnmatchedItems;
+    return AppStrings.noReportForDate;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -157,8 +180,8 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                   child: Row(
                     children: [
-                      const Expanded(
-                        child: Text(AppStrings.totalItems, style: TextStyle(color: AppColors.charcoal, fontSize: 16, fontWeight: FontWeight.w700)),
+                      Expanded(
+                        child: Text(_countLabel, style: const TextStyle(color: AppColors.charcoal, fontSize: 16, fontWeight: FontWeight.w700)),
                       ),
                       Text(
                         '${_indexes.length}',
@@ -208,7 +231,7 @@ class _StockReportItemsPageState extends State<StockReportItemsPage> {
 
   Widget _list(double view) {
     if (_indexes.isEmpty) {
-      return const Center(child: Text(AppStrings.noReportForDate, style: TextStyle(color: AppColors.muted)));
+      return Center(child: Text(_emptyLabel, style: const TextStyle(color: AppColors.muted)));
     }
     return ListView.builder(
       itemCount: _indexes.length,
@@ -305,7 +328,7 @@ class _HeadCell extends StatelessWidget {
       flex: flex,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 11, fontWeight: FontWeight.w600)),
+        child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.charcoal, fontSize: 11, fontWeight: FontWeight.w700)),
       ),
     );
   }
@@ -318,7 +341,7 @@ class _ItemHead extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(color: AppColors.muted, fontSize: 11, fontWeight: FontWeight.w600);
+    const style = TextStyle(color: AppColors.charcoal, fontSize: 11, fontWeight: FontWeight.w700);
     return ColoredBox(
       color: reportCanvas,
       child: SizedBox(
