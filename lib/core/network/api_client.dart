@@ -30,9 +30,20 @@ class ApiClient {
     return (await _send(path, body, timeout)).body;
   }
 
+  /// JSON object or list. Used by Scan to Desktop, which posts a row array.
+  Future<dynamic> postBody(
+    String path,
+    Object body, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final response = await _send(path, body, timeout);
+    if (response.body.isEmpty) return null;
+    return jsonDecode(response.body);
+  }
+
   Future<http.Response> _send(
     String path,
-    Map<String, dynamic> body,
+    Object body,
     Duration timeout,
   ) async {
     final uri = Uri.parse('${AppConstants.qaBaseUrl}$path');

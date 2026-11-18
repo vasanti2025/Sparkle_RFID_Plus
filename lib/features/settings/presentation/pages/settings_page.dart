@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_strings.dart';
@@ -66,9 +68,61 @@ class _SettingsPageState extends State<SettingsPage> {
             onChanged: _settings.setEnablePos,
           ),
         ),
+        const SizedBox(height: 12),
+        Material(
+          color: AppColors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: AppColors.cardBorder),
+          ),
+          child: SwitchListTile(
+            contentPadding: const EdgeInsets.fromLTRB(16, 8, 12, 8),
+            title: Text(
+              AppStrings.localWifiMode,
+              style: _text(size: AppTypography.body, weight: FontWeight.w700),
+            ),
+            subtitle: Text(
+              AppStrings.localWifiModeHint,
+              style: _text(size: AppTypography.label, color: AppColors.muted),
+            ),
+            value: _settings.localWifiMode,
+            activeThumbColor: AppColors.white,
+            activeTrackColor: AppColors.goldText,
+            onChanged: (value) async {
+              final messenger = ScaffoldMessenger.of(context);
+              if (value && await _wifiAddress() == null) {
+                if (!mounted) return;
+                messenger.showSnackBar(
+                  const SnackBar(content: Text(AppStrings.localWifiNeedNetwork)),
+                );
+                return;
+              }
+              await _settings.setLocalWifiMode(value);
+              if (!mounted || value) return;
+              messenger.showSnackBar(
+                const SnackBar(content: Text(AppStrings.onlineModeOn)),
+              );
+            },
+          ),
+        ),
       ],
     );
   }
+}
+
+Future<String?> _wifiAddress() async {
+  try {
+    final interfaces = await NetworkInterface.list();
+    for (final interface in interfaces) {
+      for (final address in interface.addresses) {
+        if (address.type != InternetAddressType.IPv4 || address.isLoopback) continue;
+        final ip = address.address.trim();
+        if (ip.isEmpty || ip == '0.0.0.0') continue;
+        return ip;
+      }
+    }
+  } catch (_) {}
+  return null;
 }
 
 TextStyle _text({

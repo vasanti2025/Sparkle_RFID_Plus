@@ -12,6 +12,7 @@ import '../../orders/presentation/orders_entry.dart';
 import '../../products/presentation/pages/products_page.dart';
 import '../../quotation/presentation/pages/quotation_list_page.dart';
 import '../../transfers/presentation/pages/transfer_page.dart';
+import '../../reports/presentation/pages/stock_report_page.dart';
 import '../../samples/presentation/pages/sample_page.dart';
 
 class WorkspaceModule {
@@ -76,6 +77,8 @@ void openSparkleModule(BuildContext context, String module, {bool replaceSheet =
       openPage(const SamplePage(incoming: true));
     case AppStrings.sampleOut:
       openPage(const SamplePage(incoming: false));
+    case AppStrings.reports:
+      openPage(const StockReportPage());
     case AppStrings.settings:
       openSheet(showSettingsSheet);
     default:

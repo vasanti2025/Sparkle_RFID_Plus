@@ -11,6 +11,8 @@ class SettingsController extends ChangeNotifier {
 
   bool get enablePos => preferences.enablePos;
 
+  bool get localWifiMode => preferences.localWifiMode;
+
   Future<void> load() async {
     preferences = await _repository.load();
     notifyListeners();
@@ -18,6 +20,12 @@ class SettingsController extends ChangeNotifier {
 
   Future<void> setEnablePos(bool value) async {
     preferences = preferences.copyWith(enablePos: value);
+    notifyListeners();
+    await _repository.save(preferences);
+  }
+
+  Future<void> setLocalWifiMode(bool value) async {
+    preferences = preferences.copyWith(localWifiMode: value);
     notifyListeners();
     await _repository.save(preferences);
   }

@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../desktop/presentation/pages/scan_to_desktop_page.dart';
+
 import '../demo/product_demo_session.dart';
 
 enum _ProductPage { list, single, bulk, sync }
@@ -1197,10 +1199,8 @@ class _ProductsPageState extends State<ProductsPage> {
         subtitle: AppStrings.desktopNote,
         onTap: () {
           Navigator.pop(context);
-          _previewSheet(
-            AppStrings.scanToDesktop,
-            AppStrings.desktopNote,
-            Icons.desktop_windows_outlined,
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const ScanToDesktopPage()),
           );
         },
       ),

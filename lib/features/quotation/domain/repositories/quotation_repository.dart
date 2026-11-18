@@ -35,6 +35,9 @@ abstract class QuotationRepository {
 
   List<StockItem> labeledStockMatching(String clientCode, String query);
 
+  /// Local labelled-stock match for one scanned code. No network call.
+  StockItem? stockForTag(String clientCode, String code);
+
   Future<List<StockItem>> stockForTags(
     String clientCode,
     List<String> codes, {

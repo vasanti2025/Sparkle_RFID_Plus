@@ -140,6 +140,14 @@ class QuotationRepositoryImpl implements QuotationRepository {
   }
 
   @override
+  StockItem? stockForTag(String clientCode, String code) {
+    if (stock.clientCode != clientCode || code.trim().isEmpty) return null;
+    final found = stock.findTags([code]);
+    if (found.isEmpty) return null;
+    return found.first;
+  }
+
+  @override
   Future<List<StockItem>> stockForTags(
     String clientCode,
     List<String> codes, {

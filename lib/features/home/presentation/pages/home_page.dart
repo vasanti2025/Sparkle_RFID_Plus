@@ -13,6 +13,7 @@ import '../../../orders/presentation/orders_entry.dart';
 import '../../../products/presentation/pages/products_page.dart';
 import '../../../tools/presentation/workspace_flow.dart';
 import '../../../transfers/presentation/pages/transfer_page.dart';
+import '../../../reports/presentation/pages/stock_report_page.dart';
 import '../../../samples/presentation/pages/sample_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -661,6 +662,10 @@ void _openTool(BuildContext context, String label) {
     case AppStrings.transfers:
       Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => const TransferPage()),
+      );
+    case AppStrings.reports:
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const StockReportPage()),
       );
     default:
       showModulePreview(context, label);

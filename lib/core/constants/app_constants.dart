@@ -49,4 +49,13 @@ abstract final class AppConstants {
   static const allSampleIn = '/api/Transaction/GetAllIssueItemDetails';
   static const productSyncPath =
       '/api/ProductMaster/branch-labelled-stocks/search';
+
+  static const getAllRfidDetails = '/api/RFIDDevice/GetAllRFIDDetails';
+  static const addRfidScans = '/api/RFIDDevice/AddRFID';
+  static const deleteRfidByDevice = '/api/RFIDDevice/DeleteRFIDByClientAndDevice';
+  static const updateDeviceUsers = '/api/ClientOnboarding/UpdateMultipleUser';
+  static const stockVerificationSessions =
+      '/api/ProductMaster/GetAllStockVerificationBySession';
+  static const consolidatedStockReport =
+      '/api/ProductMaster/GetConsolidationStockVerificationReport';
 }

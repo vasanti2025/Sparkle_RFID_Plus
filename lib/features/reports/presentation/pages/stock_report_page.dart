@@ -1,0 +1,878 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../../../../core/constants/app_strings.dart';
+import '../../../../core/session/app_session.dart';
+import '../../../../core/theme/app_colors.dart';
+import '../../data/stock_report_api.dart';
+import '../../data/stock_report_parse.dart';
+import '../report_chrome.dart';
+import 'stock_report_batch_page.dart';
+import 'stock_report_items_page.dart';
+
+class StockReportPage extends StatefulWidget {
+  const StockReportPage({super.key});
+
+  @override
+  State<StockReportPage> createState() => _StockReportPageState();
+}
+
+class _StockReportPageState extends State<StockReportPage> {
+  final _api = StockReportApi();
+  final _sessions = <ReportSession>[];
+  final _visible = <ReportSession>[];
+  final _branches = <({int id, String name})>[];
+  final _summaries = <BranchSummary>[];
+
+  var _batchMode = true;
+  var _loadingSessions = false;
+  var _loadingReport = false;
+  var _exporting = false;
+  var _sessionsReady = false;
+  var _reportReady = false;
+  var _exported = false;
+  String? _error;
+  String? _reportError;
+  String? _consolidatedBody;
+  DateTime _reportDate = DateTime.now();
+  int? _filterBranchId;
+  DateTime? _filterFrom;
+  DateTime? _filterTo;
+  Timer? _exportTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    final today = DateTime.now();
+    _reportDate = DateTime(today.year, today.month, today.day);
+    unawaited(_loadSessions());
+    unawaited(_loadConsolidated());
+    unawaited(_loadBranches());
+  }
+
+  @override
+  void dispose() {
+    _exportTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadBranches() async {
+    final code = AppSession.clientCode.trim();
+    if (code.isEmpty) return;
+    try {
+      final rows = await _api.branches(code);
+      if (!mounted) return;
+      setState(() {
+        _branches
+          ..clear()
+          ..addAll(rows);
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _loadSessions() async {
+    final code = AppSession.clientCode.trim();
+    if (code.isEmpty) {
+      setState(() => _error = AppStrings.reportSignIn);
+      return;
+    }
+    setState(() {
+      _loadingSessions = _sessions.isEmpty;
+      _error = null;
+    });
+    try {
+      final body = await _api.sessions(code);
+      final rows = body.trim().isEmpty ? const <ReportSession>[] : await readReport(body, parseSessions);
+      if (!mounted) return;
+      setState(() {
+        _sessions
+          ..clear()
+          ..addAll(rows);
+        _sessionsReady = true;
+        _applyFilter();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = AppStrings.reportLoadFailed);
+    } finally {
+      if (mounted) setState(() => _loadingSessions = false);
+    }
+  }
+
+  Future<void> _loadConsolidated() async {
+    final code = AppSession.clientCode.trim();
+    if (code.isEmpty) {
+      setState(() => _reportError = AppStrings.reportSignIn);
+      return;
+    }
+    final date = reportIso(_reportDate);
+    setState(() {
+      _loadingReport = true;
+      _reportError = null;
+    });
+    try {
+      final body = await _api.consolidated(clientCode: code, reportDate: date);
+      final summaries = body.trim().isEmpty ? const <BranchSummary>[] : await readReport(body, parseBranchSummaries);
+      if (!mounted) return;
+      setState(() {
+        _consolidatedBody = body;
+        _summaries
+          ..clear()
+          ..addAll(summaries);
+        _reportReady = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _reportError = AppStrings.reportLoadFailed);
+    } finally {
+      if (mounted) setState(() => _loadingReport = false);
+    }
+  }
+
+  void _applyFilter() {
+    _visible
+      ..clear()
+      ..addAll(_sessions.where((session) {
+        if (_filterBranchId != null && session.branchId != _filterBranchId) return false;
+        if (_filterFrom == null && _filterTo == null) return true;
+        final key = reportDateKey(session.startedOn);
+        final from = _filterFrom == null ? '' : reportIso(_filterFrom!);
+        final to = _filterTo == null ? '9999-12-31' : reportIso(_filterTo!);
+        return key.compareTo(from) >= 0 && key.compareTo(to) <= 0;
+      }));
+  }
+
+  Future<void> _openFilter() async {
+    final result = await showModalBottomSheet<_FilterResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (context) => _FilterSheet(
+        branches: _branches,
+        branchId: _filterBranchId,
+        from: _filterFrom ?? _reportDate,
+        to: _filterTo ?? _reportDate,
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      if (result.reset) {
+        _filterBranchId = null;
+        _filterFrom = null;
+        _filterTo = null;
+      } else {
+        _filterBranchId = result.branchId;
+        _filterFrom = result.from;
+        _filterTo = result.to;
+      }
+      _applyFilter();
+    });
+  }
+
+  Future<void> _openDate() async {
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (context) => _DateSheet(initial: _reportDate),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _reportDate = DateTime(picked.year, picked.month, picked.day));
+    await _loadConsolidated();
+  }
+
+  Future<void> _exportConsolidated({int branchId = 0, String branchName = ''}) async {
+    final body = _consolidatedBody;
+    if (body == null || body.trim().isEmpty || _exporting) return;
+    setState(() => _exporting = true);
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final name = branchName.trim().isEmpty ? 'all' : branchName.replaceAll(RegExp(r'[^\w\-]+'), '_');
+      final path = '${dir.path}/ConsolidatedReport_${reportIso(_reportDate)}_$name.csv';
+      await compute(writeConsolidatedCsv, <String, Object?>{
+        'body': body,
+        'path': path,
+        'branchId': branchId,
+        'branchName': branchName,
+      });
+      await Share.shareXFiles(
+        [XFile(path, mimeType: 'text/csv', name: path.split(Platform.pathSeparator).last)],
+        subject: AppStrings.stockVerification,
+      );
+      _showExported();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text(AppStrings.reportLoadFailed)));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  void _showExported() {
+    _exportTimer?.cancel();
+    setState(() => _exported = true);
+    _exportTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _exported = false);
+    });
+  }
+
+  void _switchMode(bool batch) {
+    setState(() => _batchMode = batch);
+    if (!batch && !_reportReady && !_loadingReport) unawaited(_loadConsolidated());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.white,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                ReportHeader(
+                  title: AppStrings.stockVerification,
+                  onDownload: _batchMode || _consolidatedBody == null ? null : () => unawaited(_exportConsolidated()),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Row(
+                    children: [
+                      Expanded(child: _modeSwitch()),
+                      const SizedBox(width: 8),
+                      if (_batchMode)
+                        ReportIconPlate(icon: Icons.filter_alt_outlined, onTap: () => unawaited(_openFilter()))
+                      else
+                        _dateChip(),
+                    ],
+                  ),
+                ),
+                if (_loadingSessions || _loadingReport || _exporting)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: LinearProgressIndicator(minHeight: 2, color: AppColors.goldText, backgroundColor: Colors.transparent),
+                  ),
+                Expanded(child: _batchMode ? _batchList() : _summaryList()),
+              ],
+            ),
+            if (_exported)
+              const Positioned(left: 16, right: 16, bottom: 16, child: ExportBanner()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _modeSwitch() {
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: const Color(0xFFF3F0EA), borderRadius: BorderRadius.circular(14)),
+      child: Row(
+        children: [
+          _mode(AppStrings.batchWise, _batchMode, () => _switchMode(true)),
+          _mode(AppStrings.consolidated, !_batchMode, () => _switchMode(false)),
+        ],
+      ),
+    );
+  }
+
+  Widget _mode(String label, bool selected, VoidCallback onTap) {
+    return Expanded(
+      child: Material(
+        color: selected ? AppColors.charcoal : Colors.transparent,
+        borderRadius: BorderRadius.circular(11),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(11),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? AppColors.white : AppColors.charcoal,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dateChip() {
+    return Material(
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: () => unawaited(_openDate()),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          height: 44,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: reportLine)),
+          child: Row(
+            children: [
+              Text(reportDayLabel(_reportDate), style: const TextStyle(color: AppColors.charcoal, fontSize: 12, fontWeight: FontWeight.w600)),
+              const SizedBox(width: 4),
+              const Icon(Icons.calendar_today_outlined, size: 14, color: AppColors.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _batchList() {
+    if (_error != null && _sessions.isEmpty) return _message(_error!, retry: _loadSessions);
+    if (_loadingSessions && _sessions.isEmpty) return const Center(child: CircularProgressIndicator(color: AppColors.charcoal));
+    if (_sessionsReady && _visible.isEmpty) return _message(AppStrings.noBatches, retry: _loadSessions);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final view = constraints.maxWidth;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: view + _batchExtraWidth,
+            child: Column(
+              children: [
+                _batchHead(view),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.only(top: 4, bottom: 24),
+                    itemCount: _visible.length,
+                    addAutomaticKeepAlives: false,
+                    itemBuilder: (context, index) {
+                      final session = _visible[index];
+                      return _BatchTile(
+                        session: session,
+                        viewWidth: view,
+                        onTap: () {
+                          final id = session.scanBatchId.trim();
+                          if (id.isEmpty) return;
+                          Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => StockReportBatchPage(scanBatchId: id)));
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static const _batchExtraWidth = 160.0;
+
+  Widget _batchHead(double view) {
+    const style = TextStyle(color: AppColors.muted, fontSize: 12);
+    return ColoredBox(
+      color: reportCanvas,
+      child: SizedBox(
+        height: 36,
+        child: Row(
+          children: [
+            SizedBox(width: view, child: _visibleBatchHead(style)),
+            const SizedBox(width: 72, child: Text(AppStrings.reportMatch, textAlign: TextAlign.right, style: style)),
+            const SizedBox(
+              width: 88,
+              child: Padding(
+                padding: EdgeInsets.only(right: 16),
+                child: Text(AppStrings.unmatched, textAlign: TextAlign.right, style: style),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _visibleBatchHead(TextStyle style) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(flex: 4, child: Text(AppStrings.branch, style: style)),
+          Expanded(flex: 5, child: Text(AppStrings.startEnd, style: style)),
+          Expanded(flex: 3, child: Text(AppStrings.totalQty, textAlign: TextAlign.right, style: style)),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryList() {
+    if (_reportError != null && _summaries.isEmpty) return _message(_reportError!, retry: _loadConsolidated);
+    if (_loadingReport && _summaries.isEmpty) return const Center(child: CircularProgressIndicator(color: AppColors.charcoal));
+    if (_reportReady && _summaries.isEmpty) return _message(AppStrings.noReportForDate, retry: _loadConsolidated);
+    return Column(
+      children: [
+        _summaryHead(),
+        Expanded(
+          child: ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      itemCount: _summaries.length,
+      itemBuilder: (context, index) {
+        final branch = _summaries[index];
+        return _SummaryTile(
+          branch: branch,
+          onTap: () {
+            final body = _consolidatedBody;
+            if (body == null || body.isEmpty) return;
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => StockReportItemsPage(
+                  title: branch.name.isEmpty ? AppStrings.branch : branch.name,
+                  dateLabel: reportDayLabel(_reportDate),
+                  body: body,
+                  branchId: branch.id,
+                  branchName: branch.name,
+                ),
+              ),
+            );
+          },
+        );
+      },
+    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _summaryHead() {
+    const style = TextStyle(color: AppColors.muted, fontSize: 12);
+    return const ColoredBox(
+      color: reportCanvas,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Row(
+          children: [
+            Expanded(flex: 4, child: Text(AppStrings.branch, style: style)),
+            Expanded(flex: 2, child: Text(AppStrings.reportTotal, textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 2, child: Text(AppStrings.matched, textAlign: TextAlign.right, style: style)),
+            Expanded(flex: 3, child: Text(AppStrings.unmatched, textAlign: TextAlign.right, style: style)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _message(String text, {required Future<void> Function() retry}) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(text, style: const TextStyle(color: AppColors.muted)),
+          TextButton(onPressed: () => unawaited(retry()), child: const Text(AppStrings.tryAgain)),
+        ],
+      ),
+    );
+  }
+}
+
+class _BatchTile extends StatelessWidget {
+  const _BatchTile({required this.session, required this.viewWidth, required this.onTap});
+
+  final ReportSession session;
+  final double viewWidth;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: reportLine))),
+        child: Row(
+          children: [
+            SizedBox(width: viewWidth, child: _visible()),
+            SizedBox(
+              width: 72,
+              child: Text('${session.matchQty}', textAlign: TextAlign.right, style: const TextStyle(color: reportMatchedText, fontWeight: FontWeight.w700, fontSize: 14)),
+            ),
+            SizedBox(
+              width: 88,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Text('${session.unmatchQty}', textAlign: TextAlign.right, style: const TextStyle(color: reportUnmatchedText, fontWeight: FontWeight.w700, fontSize: 14)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _visible() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 4,
+            child: Text(
+              session.branchName.isEmpty ? '—' : session.branchName,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 13),
+            ),
+          ),
+          Expanded(
+            flex: 5,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Start: ${reportStamp(session.startedOn)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+                Text('End: ${reportStamp(session.endedOn)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+              ],
+            ),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(
+              '${session.totalQty}',
+              textAlign: TextAlign.right,
+              style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryTile extends StatelessWidget {
+  const _SummaryTile({required this.branch, required this.onTap});
+
+  final BranchSummary branch;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const number = TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w600, fontSize: 13);
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: reportLine))),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 4,
+              child: Text(
+                branch.name.isEmpty ? '—' : branch.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+            ),
+            Expanded(flex: 2, child: Text('${branch.total}', textAlign: TextAlign.right, style: number)),
+            Expanded(flex: 2, child: Text('${branch.matched}', textAlign: TextAlign.right, style: number)),
+            Expanded(flex: 3, child: Text('${branch.unmatched}', textAlign: TextAlign.right, style: number)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FilterResult {
+  const _FilterResult({required this.reset, this.branchId, this.from, this.to});
+
+  final bool reset;
+  final int? branchId;
+  final DateTime? from;
+  final DateTime? to;
+}
+
+class _FilterSheet extends StatefulWidget {
+  const _FilterSheet({
+    required this.branches,
+    required this.branchId,
+    required this.from,
+    required this.to,
+  });
+
+  final List<({int id, String name})> branches;
+  final int? branchId;
+  final DateTime from;
+  final DateTime to;
+
+  @override
+  State<_FilterSheet> createState() => _FilterSheetState();
+}
+
+class _FilterSheetState extends State<_FilterSheet> {
+  late int? _branchId = widget.branchId;
+  late DateTime _from = widget.from;
+  late DateTime _to = widget.to;
+
+  Future<void> _pick(bool from) async {
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (context) => _DateSheet(initial: from ? _from : _to),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (from) {
+        _from = picked;
+        if (_to.isBefore(_from)) _to = picked;
+      } else if (!picked.isBefore(_from)) {
+        _to = picked;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(AppStrings.filterReports, style: TextStyle(color: AppColors.charcoal, fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
+                IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close, color: AppColors.charcoal)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(AppStrings.branch, style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 6),
+            DropdownButtonFormField<int?>(
+              initialValue: _branchId,
+              isExpanded: true,
+              decoration: _fieldDecoration(),
+              items: [
+                const DropdownMenuItem<int?>(value: null, child: Text(AppStrings.allBranches)),
+                for (final branch in widget.branches)
+                  DropdownMenuItem<int?>(value: branch.id, child: Text(branch.name, overflow: TextOverflow.ellipsis)),
+              ],
+              onChanged: (value) => setState(() => _branchId = value),
+            ),
+            const SizedBox(height: 14),
+            const Text(AppStrings.reportFromDate, style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 6),
+            _dateBox(reportDayLabel(_from), () => unawaited(_pick(true))),
+            const SizedBox(height: 14),
+            const Text(AppStrings.reportToDate, style: TextStyle(color: AppColors.muted, fontSize: 12)),
+            const SizedBox(height: 6),
+            _dateBox(reportDayLabel(_to), () => unawaited(_pick(false))),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, const _FilterResult(reset: true)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.charcoal,
+                      side: const BorderSide(color: reportLine),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(AppStrings.reset),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(
+                      context,
+                      _FilterResult(reset: false, branchId: _branchId, from: _from, to: _to),
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.charcoal,
+                      foregroundColor: AppColors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(AppStrings.applyFilters),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dateBox(String label, VoidCallback onTap) {
+    return Material(
+      color: AppColors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(12), border: Border.all(color: reportLine)),
+          child: Row(
+            children: [
+              Expanded(child: Text(label, style: const TextStyle(color: AppColors.charcoal))),
+              const Icon(Icons.calendar_today_outlined, size: 16, color: AppColors.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+InputDecoration _fieldDecoration() {
+  return InputDecoration(
+    filled: true,
+    fillColor: AppColors.white,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: reportLine)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: reportLine)),
+  );
+}
+
+class _DateSheet extends StatefulWidget {
+  const _DateSheet({required this.initial});
+
+  final DateTime initial;
+
+  @override
+  State<_DateSheet> createState() => _DateSheetState();
+}
+
+class _DateSheetState extends State<_DateSheet> {
+  late DateTime _visible = DateTime(widget.initial.year, widget.initial.month);
+  late DateTime _selected = DateTime(widget.initial.year, widget.initial.month, widget.initial.day);
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final first = DateTime(_visible.year, _visible.month);
+    final days = DateTime(_visible.year, _visible.month + 1, 0).day;
+    final lead = first.weekday % 7;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(AppStrings.selectDate, style: TextStyle(color: AppColors.charcoal, fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
+                IconButton(
+                  onPressed: _visible.year <= 2020 && _visible.month == 1
+                      ? null
+                      : () => setState(() => _visible = DateTime(_visible.year, _visible.month - 1)),
+                  icon: const Icon(Icons.chevron_left, color: AppColors.charcoal),
+                ),
+                PopupMenuButton<int>(
+                  onSelected: (month) => setState(() => _visible = DateTime(_visible.year, month)),
+                  itemBuilder: (context) => [
+                    for (var month = 1; month <= 12; month++)
+                      PopupMenuItem(value: month, child: Text(reportMonths[month - 1])),
+                  ],
+                  child: Row(
+                    children: [
+                      Text(
+                        '${reportMonths[_visible.month - 1]} ${_visible.year}',
+                        style: const TextStyle(color: AppColors.charcoal, fontWeight: FontWeight.w600),
+                      ),
+                      const Icon(Icons.expand_more, color: AppColors.charcoal),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: _visible.year > today.year || (_visible.year == today.year && _visible.month >= today.month)
+                      ? null
+                      : () => setState(() => _visible = DateTime(_visible.year, _visible.month + 1)),
+                  icon: const Icon(Icons.chevron_right, color: AppColors.charcoal),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (final label in const ['S', 'M', 'T', 'W', 'T', 'F', 'S'])
+                  Expanded(child: Center(child: Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 12)))),
+              ],
+            ),
+            const SizedBox(height: 8),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: lead + days,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 7, mainAxisSpacing: 4),
+              itemBuilder: (context, index) {
+                if (index < lead) return const SizedBox.shrink();
+                final day = index - lead + 1;
+                final date = DateTime(_visible.year, _visible.month, day);
+                final future = date.isAfter(DateTime(today.year, today.month, today.day));
+                final selected = date == _selected;
+                return InkWell(
+                  onTap: future ? null : () => setState(() => _selected = date),
+                  customBorder: const CircleBorder(),
+                  child: Center(
+                    child: Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(color: selected ? AppColors.charcoal : Colors.transparent, shape: BoxShape.circle),
+                      child: Text(
+                        '$day',
+                        style: TextStyle(
+                          color: selected ? AppColors.white : (future ? const Color(0xFFC8C4BC) : AppColors.charcoal),
+                          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(AppStrings.cancel, style: TextStyle(color: AppColors.charcoal)),
+                  ),
+                ),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context, _selected),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.charcoal,
+                      foregroundColor: AppColors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(AppStrings.applyDate),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

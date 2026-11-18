@@ -8,6 +8,7 @@ class AppSession {
   static int branchId = 0;
   static int branchNo = 0;
   static int employeeId = 0;
+  static String branchName = '';
 
   static void apply({
     required String clientCode,
@@ -16,9 +17,11 @@ class AppSession {
     int? branchId,
     int? branchNo,
     int? employeeId,
+    String branchName = '',
   }) {
     AppSession.clientCode = clientCode.trim();
     AppSession.userId = userId.trim();
+    AppSession.branchName = branchName.trim();
     AppSession.token = token.trim();
     if (branchId != null) AppSession.branchId = branchId;
     if (branchNo != null) AppSession.branchNo = branchNo;
@@ -32,5 +35,6 @@ class AppSession {
     branchId = 0;
     branchNo = 0;
     employeeId = 0;
+    branchName = '';
   }
 }
