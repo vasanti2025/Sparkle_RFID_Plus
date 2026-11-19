@@ -17,6 +17,7 @@ import '../../domain/entities/quotation_draft.dart';
 import '../../domain/entities/stock_item.dart';
 import '../widgets/stock_picker_sheet.dart';
 import 'add_customer_page.dart';
+import 'quotation_list_page.dart';
 
 class SparkleQuotationPage extends StatefulWidget {
   const SparkleQuotationPage({super.key, this.detail});
@@ -249,7 +250,18 @@ class _SparkleQuotationPageState extends State<SparkleQuotationPage> {
         backgroundColor: AppColors.homeSurface,
         foregroundColor: AppColors.charcoal,
         elevation: 0,
-        actions: const [LanguageButton()],
+        actions: [
+          IconButton(
+            tooltip: tr(AppStrings.quotations),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const QuotationListPage()),
+              );
+            },
+            icon: const Icon(Icons.list_alt),
+          ),
+          const LanguageButton(),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

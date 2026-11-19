@@ -5,7 +5,7 @@ import '../../../../core/session/app_session.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
-import '../../../quotation/presentation/pages/quotation_list_page.dart';
+import '../../../quotation/presentation/quotation_entry.dart';
 import '../../../settings/presentation/pages/settings_page.dart';
 import '../../../find/presentation/pages/find_jewellery_page.dart';
 import '../../../inventory/presentation/pages/inventory_page.dart';
@@ -123,7 +123,7 @@ class _HomePageState extends State<HomePage>
             _ToolGrid(
               onQuotations: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const QuotationListPage()),
+                  MaterialPageRoute<void>(builder: (_) => quotationScreen()),
                 );
               },
             ),
