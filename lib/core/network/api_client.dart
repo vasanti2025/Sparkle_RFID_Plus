@@ -15,8 +15,9 @@ class ApiClient {
     String path,
     Map<String, dynamic> body, {
     Duration timeout = const Duration(seconds: 30),
+    String? baseUrl,
   }) async {
-    final response = await _send(path, body, timeout);
+    final response = await _send(path, body, timeout, baseUrl: baseUrl);
     if (response.body.isEmpty) return null;
     return jsonDecode(response.body);
   }
@@ -33,9 +34,11 @@ class ApiClient {
   Future<http.Response> _send(
     String path,
     Map<String, dynamic> body,
-    Duration timeout,
-  ) async {
-    final uri = Uri.parse('${AppConstants.qaBaseUrl}$path');
+    Duration timeout, {
+    String? baseUrl,
+  }) async {
+    final host = (baseUrl ?? AppConstants.qaBaseUrl).replaceAll(RegExp(r'/+$'), '');
+    final uri = Uri.parse('$host$path');
     try {
       final token = AppSession.token;
       final response = await _client

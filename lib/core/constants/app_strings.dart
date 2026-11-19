@@ -230,7 +230,6 @@ abstract final class AppStrings {
   static const reports = 'Reports';
   static const sampleIn = 'Sample in';
   static const sampleOut = 'Sample out';
-  static const chooseCustomer = 'Choose a customer';
   static const searchCustomer = 'Search customer';
   static const returnDate = 'Return date';
   static const description = 'Description';
@@ -714,6 +713,10 @@ abstract final class AppStrings {
   static const backToWorkspace = 'Back to workspace';
   static const labelTodayRate = 'Label Today Rate';
   static const deliveryChallan = 'Delivery challan';
+  static const layoutCouldNotLoad = 'The form layout could not be loaded.';
+  static const noFieldsOnPage = 'This page has no fields yet.';
+  static const pageNotEnabled = 'This page is not enabled for your account.';
+  static const signInForLayout = 'Sign in to load this form.';
   static const labelTodayNote =
       'The existing module is retained. Its exact function and label should be confirmed with the product team.';
   static const connectsExisting =
