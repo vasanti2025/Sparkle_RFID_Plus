@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../../../core/constants/app_strings.dart';
@@ -31,8 +32,12 @@ abstract class ProductLocalDataSource {
 
   Future<Map<String, String>> rfidMap();
 
+  /// Removes every previously synced product, then stores only [items].
   Future<int> upsertProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress});
 }
+
+const productCatalogueSourceKey = 'product_catalogue_source';
+const productCatalogueSheet = 'sheet';
 
 class ProductLocalDataSourceImpl implements ProductLocalDataSource {
   ProductLocalDataSourceImpl();
@@ -79,15 +84,19 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
       if (!await productFile.exists()) {
         throw const FileSystemException('Product file missing');
       }
-      await _replaceFile(
-        database: database,
-        file: productFile,
-        kind: StoredRecord.kindProduct,
-        controller: controller,
-        message: AppStrings.savingProducts,
-        start: 0.9,
-        end: 1,
-      );
+      final prefs = await SharedPreferences.getInstance();
+      final sheetCatalogue = prefs.getString(productCatalogueSourceKey) == productCatalogueSheet;
+      if (!sheetCatalogue) {
+        await _replaceFile(
+          database: database,
+          file: productFile,
+          kind: StoredRecord.kindProduct,
+          controller: controller,
+          message: AppStrings.savingProducts,
+          start: 0.9,
+          end: 1,
+        );
+      }
       await productFile.delete();
       if (!controller.isClosed) {
         controller.add(
@@ -330,30 +339,36 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
 
   @override
   Future<int> upsertProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress}) async {
-    if (items.isEmpty) return 0;
     final database = await _open();
+    await database.delete(
+      'synced_records',
+      where: 'kind = ?',
+      whereArgs: [StoredRecord.kindProduct],
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(productCatalogueSourceKey, productCatalogueSheet);
+    if (items.isEmpty) return 0;
     var written = 0;
     const page = 200;
     for (var start = 0; start < items.length; start += page) {
       final end = start + page > items.length ? items.length : start + page;
       final slice = items.sublist(start, end);
       await database.transaction((txn) async {
+        final batch = txn.batch();
         for (final item in slice) {
-          final code = _text(item, const ['ItemCode', 'itemCode']);
-          if (code != null) {
-            await txn.delete(
-              'synced_records',
-              where: 'kind = ? AND item_code = ?',
-              whereArgs: [StoredRecord.kindProduct, code],
-            );
-          }
-          await txn.insert('synced_records', _row(StoredRecord.kindProduct, item));
+          batch.insert('synced_records', _row(StoredRecord.kindProduct, item));
         }
+        await batch.commit(noResult: true);
       });
       written = end;
       onProgress?.call(written);
       await Future<void>.delayed(Duration.zero);
     }
+    await database.insert('sync_meta', {
+      'kind': StoredRecord.kindProduct,
+      'saved_at': DateTime.now().toUtc().toIso8601String(),
+      'record_count': written,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     return written;
   }
 

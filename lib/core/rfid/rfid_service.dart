@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:rfid_flutter_android/rfid_flutter_android.dart';
 
+import 'rfid_ble_tray.dart';
+
 /// Chainway inventory mode for LED tags. The Dart enum only lists EPC modes,
 /// but the Android plugin accepts this value.
 const int kLedTagInventoryMode = 14;
@@ -18,31 +20,53 @@ class RfidService {
   static const MethodChannel _uart = MethodChannel('rfid_flutter_android/uart');
 
   bool _ready = false;
+  bool _usingTray = false;
+  int _bank = kEpcInventoryMode;
+  int _power = 5;
+  final _tray = RfidBleTray();
+  final _tags = StreamController<List<RfidTagInfo>>.broadcast();
+  StreamSubscription<List<RfidTagInfo>>? _uartTags;
+  StreamSubscription<List<RfidTagInfo>>? _trayTags;
 
   bool get isSupported => Platform.isAndroid;
 
-  bool get isReady => _ready;
+  bool get isReady => _ready || _usingTray;
 
   RfidWithUart get _reader => RfidWithUart.instance;
 
   Stream<RfidKeyEvent> get keyDownStream => DeviceManager.instance.keyDownEventStream;
 
+  void _listenTags() {
+    _uartTags ??= _reader.rfidTagStream.listen(_tags.add);
+    _trayTags ??= _tray.tags.listen(_tags.add);
+  }
+
   Future<String?> init() async {
     if (!isSupported) {
       return 'This RFID reader runs on Android handhelds only.';
     }
-    if (_ready) return null;
+    _listenTags();
+    _usingTray = await _tray.attachIfConnected();
+    if (_usingTray || _ready) return null;
 
     final result = await _reader.init();
-    if (!result.isEffective) {
-      return result.error ?? 'RFID init failed';
+    if (result.isEffective) {
+      _ready = true;
+      return null;
     }
-    _ready = true;
-    return null;
+    // A phone has no UART reader. Use the tray paired in Android Bluetooth.
+    _usingTray = await _tray.attachPaired();
+    if (_usingTray) return null;
+    if (_tray.needsPermission) {
+      return 'Allow Bluetooth permission, then scan again.';
+    }
+    return result.error ?? 'RFID init failed';
   }
 
   Future<void> stopIfRunning() async {
-    if (!isSupported || !_ready) return;
+    if (!isSupported) return;
+    if (_usingTray) await _tray.stop();
+    if (!_ready) return;
     final running = await _reader.isInventorying();
     if (running.data == true) {
       await _reader.stopInventory();
@@ -65,18 +89,23 @@ class RfidService {
   }
 
   Future<String?> setInventoryMode(int bank) async {
+    _bank = bank;
+    if (_usingTray) {
+      final ok = await _tray.setInventoryMode(bank);
+      if (ok) return null;
+    }
     final blocked = await _requireReady();
-    if (blocked != null) return blocked;
+    if (blocked != null) return _usingTray ? null : blocked;
     try {
       final ok = await _uart.invokeMethod<bool>('setInventoryMode', {
         'inventoryBank': bank,
         'offset': 0,
         'length': 0,
       });
-      if (ok != true) return 'Could not set inventory mode';
+      if (ok != true) return _usingTray ? null : 'Could not set inventory mode';
       return null;
     } on PlatformException catch (error) {
-      return error.message ?? error.code;
+      return _usingTray ? null : error.message ?? error.code;
     }
   }
 
@@ -93,9 +122,24 @@ class RfidService {
     }
   }
 
-  Stream<List<RfidTagInfo>> get tagStream => _reader.rfidTagStream;
+  Stream<List<RfidTagInfo>> get tagStream {
+    _listenTags();
+    return _tags.stream;
+  }
 
   Future<String?> startInventory({List<RfidFilter>? filters, bool unique = false}) async {
+    _listenTags();
+    final trayReady = await _tray.attachIfConnected() || (!_ready && await _tray.attachPaired());
+    if (trayReady) {
+      _usingTray = true;
+      await _tray.setInventoryMode(_bank);
+      await _tray.setPower(_power);
+      if (await _tray.start()) return null;
+      if (!_ready) {
+        return 'Could not start the Bluetooth tray. Keep it connected and scan again.';
+      }
+      _usingTray = false;
+    }
     final blocked = await _requireReady();
     if (blocked != null) return blocked;
     final result = await _reader.startInventory(
@@ -107,10 +151,10 @@ class RfidService {
   }
 
   Future<String?> stopInventory() async {
-    final blocked = await _requireReady();
-    if (blocked != null) return blocked;
+    if (_usingTray) await _tray.stop();
+    if (!_ready) return _usingTray ? null : await _requireReady();
     final result = await _reader.stopInventory();
-    if (!result.isEffective) return result.error ?? 'Stop scan failed';
+    if (!result.isEffective && !_usingTray) return result.error ?? 'Stop scan failed';
     return null;
   }
 
@@ -200,6 +244,11 @@ class RfidService {
   }
 
   Future<String?> setPower(int power) async {
+    _power = power;
+    if (_usingTray) {
+      final ok = await _tray.setPower(power);
+      if (ok || !_ready) return ok ? null : 'Set power failed';
+    }
     final blocked = await _requireReady();
     if (blocked != null) return blocked;
     final result = await _reader.setPower(power);

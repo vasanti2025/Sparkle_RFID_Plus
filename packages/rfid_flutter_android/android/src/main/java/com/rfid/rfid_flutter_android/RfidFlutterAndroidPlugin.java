@@ -7,6 +7,8 @@ import androidx.annotation.NonNull;
 
 import com.rfid.rfid_flutter_android.channel.BarcodeChannelHandler;
 import com.rfid.rfid_flutter_android.channel.BarcodeEventHandler;
+import com.rfid.rfid_flutter_android.channel.BleChannelHandler;
+import com.rfid.rfid_flutter_android.channel.BleEventHandler;
 import com.rfid.rfid_flutter_android.channel.DeviceInfoChannelHandler;
 import com.rfid.rfid_flutter_android.channel.UARTChannelHandler;
 import com.rfid.rfid_flutter_android.channel.UARTEventHandler;
@@ -28,6 +30,7 @@ public class RfidFlutterAndroidPlugin implements FlutterPlugin, ActivityAware {
 
     private Context context;
     private WindowEventHandler windowEventHandler;
+    private BleChannelHandler bleChannelHandler;
 
     private ExecutorService executor;
 
@@ -58,6 +61,12 @@ public class RfidFlutterAndroidPlugin implements FlutterPlugin, ActivityAware {
         MethodChannel channelDeviceInfo = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "rfid_flutter_android/deviceInfo");
         channelDeviceInfo.setMethodCallHandler(new DeviceInfoChannelHandler(context, executor));
 
+        bleChannelHandler = new BleChannelHandler(context, executor);
+        MethodChannel channelBle = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "rfid_flutter_android/ble");
+        channelBle.setMethodCallHandler(bleChannelHandler);
+        EventChannel bleEventChannel = new EventChannel(flutterPluginBinding.getBinaryMessenger(), "rfid_flutter_android/bleEvent");
+        bleEventChannel.setStreamHandler(new BleEventHandler(context));
+
         windowEventHandler = new WindowEventHandler();
         EventChannel windowEventChannel = new EventChannel(flutterPluginBinding.getBinaryMessenger(), "rfid_flutter_android/windowEvent");
         windowEventChannel.setStreamHandler(windowEventHandler);
@@ -80,6 +89,7 @@ public class RfidFlutterAndroidPlugin implements FlutterPlugin, ActivityAware {
     @Override
     public void onAttachedToActivity(@NonNull ActivityPluginBinding activityPluginBinding) {
         activity = activityPluginBinding.getActivity();
+        if (bleChannelHandler != null) bleChannelHandler.setActivity(activity);
         if (windowEventHandler != null) {
             windowEventHandler.setWindowCallback(activity.getWindow().getCallback());
             activity.getWindow().setCallback(windowEventHandler);
@@ -89,15 +99,18 @@ public class RfidFlutterAndroidPlugin implements FlutterPlugin, ActivityAware {
     @Override
     public void onDetachedFromActivityForConfigChanges() {
         activity = null;
+        if (bleChannelHandler != null) bleChannelHandler.setActivity(null);
     }
 
     @Override
     public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding activityPluginBinding) {
         activity = activityPluginBinding.getActivity();
+        if (bleChannelHandler != null) bleChannelHandler.setActivity(activity);
     }
 
     @Override
     public void onDetachedFromActivity() {
         activity = null;
+        if (bleChannelHandler != null) bleChannelHandler.setActivity(null);
     }
 }

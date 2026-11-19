@@ -5,13 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../desktop/presentation/pages/scan_to_desktop_page.dart';
+import '../../data/datasources/product_local_data_source.dart';
 import '../../data/product_csv.dart';
+import '../../domain/entities/stored_record.dart';
 import '../import_excel_flow.dart';
 
 import '../demo/product_demo_session.dart';
@@ -65,6 +68,13 @@ class _ProductsPageState extends State<ProductsPage> {
 
   final _session = ProductDemoSession.instance;
   final _query = TextEditingController();
+  final _storedScroll = ScrollController();
+  final _stored = <CataloguePiece>[];
+  var _sheetCatalogue = false;
+  var _storedTotal = 0;
+  var _storedLoading = false;
+  var _storedTicket = 0;
+  Timer? _searchTimer;
   final _fields = <String, TextEditingController>{};
   final _rows = <_RowEditors>[];
   var _page = _ProductPage.list;
@@ -96,11 +106,20 @@ class _ProductsPageState extends State<ProductsPage> {
   void initState() {
     super.initState();
     _query.text = _session.query;
+    _storedScroll.addListener(_onStoredScroll);
     _query.addListener(() {
       if (_suspend || !mounted) return;
       _session.query = _query.text;
+      _searchTimer?.cancel();
+      if (_sheetCatalogue) {
+        _searchTimer = Timer(const Duration(milliseconds: 300), () {
+          unawaited(_reloadStored());
+        });
+        return;
+      }
       if (_page == _ProductPage.list) setState(() {});
     });
+    unawaited(_reloadStored());
     Injection.settings.addListener(_onLanguage);
     for (final key in _singleKeys) {
       final controller = TextEditingController();
@@ -122,6 +141,8 @@ class _ProductsPageState extends State<ProductsPage> {
     Injection.settings.removeListener(_onLanguage);
     _suspend = true;
     _timer?.cancel();
+    _searchTimer?.cancel();
+    _storedScroll.dispose();
     if (_session.syncPhase == 'running') _session.syncPhase = 'paused';
     _query.dispose();
     for (final controller in _fields.values) {
@@ -654,7 +675,90 @@ class _ProductsPageState extends State<ProductsPage> {
     );
   }
 
+  void _onStoredScroll() {
+    if (!_sheetCatalogue || !_storedScroll.hasClients) return;
+    final position = _storedScroll.position;
+    if (position.pixels < position.maxScrollExtent - 480) return;
+    unawaited(_loadMoreStored());
+  }
+
+  Future<void> _reloadStored() async {
+    if (!Injection.ready) return;
+    final ticket = ++_storedTicket;
+    final prefs = await SharedPreferences.getInstance();
+    final sheet = prefs.getString(productCatalogueSourceKey) == productCatalogueSheet;
+    if (!sheet) {
+      if (!mounted || ticket != _storedTicket) return;
+      setState(() {
+        _sheetCatalogue = false;
+        _storedTotal = 0;
+        _stored.clear();
+      });
+      return;
+    }
+    final query = _query.text.trim();
+    final total = await Injection.productRepository.storedCount();
+    final page = await Injection.productRepository.searchStored(query: query, limit: 40);
+    if (!mounted || ticket != _storedTicket) return;
+    setState(() {
+      _sheetCatalogue = true;
+      _storedTotal = total;
+      _stored
+        ..clear()
+        ..addAll(page.map(_pieceFromStored));
+    });
+  }
+
+  Future<void> _loadMoreStored() async {
+    if (!_sheetCatalogue || _storedLoading || !Injection.ready) return;
+    final query = _query.text.trim();
+    if (query.isEmpty && _stored.length >= _storedTotal) return;
+    final ticket = _storedTicket;
+    _storedLoading = true;
+    final page = await Injection.productRepository.searchStored(
+      query: query,
+      limit: 40,
+      offset: _stored.length,
+    );
+    _storedLoading = false;
+    if (!mounted || ticket != _storedTicket || page.isEmpty) return;
+    setState(() => _stored.addAll(page.map(_pieceFromStored)));
+  }
+
+  CataloguePiece _pieceFromStored(StoredRecord record) {
+    String? text(List<String> keys) {
+      for (final key in keys) {
+        final value = record.payload[key]?.toString().trim();
+        if (value != null && value.isNotEmpty && value.toLowerCase() != 'null') return value;
+      }
+      return null;
+    }
+
+    int? milligrams(String? raw) {
+      if (raw == null) return null;
+      final value = double.tryParse(raw.replaceAll(',', ''));
+      if (value == null) return null;
+      return (value * 1000).round();
+    }
+
+    return CataloguePiece(
+      id: text(const ['ItemCode', 'itemCode']) ?? record.itemCode ?? '',
+      name: text(const ['ProductName', 'productName', 'ItemName']) ?? record.name ?? '',
+      epc: text(const ['EPC', 'Epc']) ?? '',
+      rfid: text(const ['RFIDCode', 'RfidCode', 'RFID']) ?? '',
+      category: text(const ['CategoryName']) ?? '',
+      design: text(const ['DesignName']) ?? '',
+      purity: text(const ['PurityName']) ?? '',
+      vendor: text(const ['VendorName']) ?? '',
+      sku: text(const ['SKU', 'Sku']) ?? '',
+      grossMg: milligrams(text(const ['GrossWeight'])),
+      netMg: milligrams(text(const ['NetWeight'])),
+      origin: 'sheet',
+    );
+  }
+
   Widget _list() {
+    if (_sheetCatalogue) return _sheetList();
     final rows = _session.visible;
     return Column(
       children: [
@@ -746,11 +850,110 @@ class _ProductsPageState extends State<ProductsPage> {
     );
   }
 
+  Widget _sheetList() {
+    final rows = _stored;
+    final count = _query.text.trim().isEmpty ? _storedTotal : rows.length;
+    return Column(
+      children: [
+        Expanded(
+          child: CustomScrollView(
+            controller: _storedScroll,
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    Row(
+                      children: [
+                        Text(
+                          AppStrings.findAddSync,
+                          style: _text(size: 10, weight: FontWeight.w600, color: _demoInk),
+                        ),
+                        const Spacer(),
+                        _tag(tx('sheetData', 'Sheet data')),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _query,
+                      style: _text(size: 12),
+                      cursorColor: _searchFocus,
+                      decoration: InputDecoration(
+                        hintText: AppStrings.searchProducts,
+                        hintStyle: _text(size: 12, color: _searchIcon),
+                        prefixIcon: const Icon(Icons.search, size: 18, color: _searchIcon),
+                        filled: true,
+                        fillColor: AppColors.white,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                        border: _searchBorder(_searchLine),
+                        enabledBorder: _searchBorder(_searchLine),
+                        focusedBorder: _searchBorder(_searchFocus),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        _toolButton(
+                          icon: Icons.sync,
+                          label: AppStrings.syncData,
+                          onPressed: () => setState(() => _page = _ProductPage.sync),
+                        ),
+                        const SizedBox(width: 8),
+                        _toolButton(
+                          icon: Icons.swap_vert,
+                          label: tx('dataTools', AppStrings.dataTools),
+                          onPressed: _dataTools,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Text(
+                          AppStrings.productsLabel,
+                          style: _text(size: 12, weight: FontWeight.w700, letterSpacing: 0.6),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '$count ${count == 1 ? AppStrings.piece : AppStrings.pieces}',
+                          style: _text(size: 12, color: AppColors.muted),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (rows.isEmpty) _empty(AppStrings.noMatchingProducts, AppStrings.tryProductSearch),
+                  ]),
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => _productCard(rows[index]),
+                    childCount: rows.length,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _footer(
+          label: AppStrings.addProducts,
+          icon: Icons.add,
+          onPressed: _addSheet,
+          note: AppStrings.addProductsNote,
+        ),
+      ],
+    );
+  }
+
   Widget _productCard(CataloguePiece item) {
     final gross = item.grossMg == null
         ? '—'
         : '${ProductDemoSession.grams(item.grossMg)} g';
     final saved = item.origin == 'manual';
+    final sheet = item.origin == 'sheet';
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: _card(
@@ -770,7 +973,11 @@ class _ProductsPageState extends State<ProductsPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    saved ? AppStrings.savedOnDeviceDemo : AppStrings.referenceItemDemo,
+                    sheet
+                        ? tx('sheetData', 'Sheet data')
+                        : saved
+                            ? AppStrings.savedOnDeviceDemo
+                            : AppStrings.referenceItemDemo,
                     style: _text(size: 10, color: _status),
                   ),
                 ],
@@ -1284,7 +1491,9 @@ class _ProductsPageState extends State<ProductsPage> {
         subtitle: tx('importExcelHint', AppStrings.importExcelHint),
         onTap: () {
           Navigator.pop(context);
-          unawaited(ImportExcelFlow.start(context));
+          unawaited(ImportExcelFlow.start(context).whenComplete(() {
+            if (mounted) unawaited(_reloadStored());
+          }));
         },
       ),
       _choice(
@@ -1293,7 +1502,9 @@ class _ProductsPageState extends State<ProductsPage> {
         subtitle: tx('syncSheetHint', 'Use the same column mapping from a Google Sheet.'),
         onTap: () {
           Navigator.pop(context);
-          unawaited(ImportExcelFlow.startSheet(context));
+          unawaited(ImportExcelFlow.startSheet(context).whenComplete(() {
+            if (mounted) unawaited(_reloadStored());
+          }));
         },
       ),
       _choice(
@@ -1395,6 +1606,7 @@ class _ProductsPageState extends State<ProductsPage> {
 
   void _detail(CataloguePiece item) {
     final saved = item.origin == 'manual';
+    final sheet = item.origin == 'sheet';
     _sheet(item.name, [
       _summaryLine(AppStrings.itemCode, item.id),
       const SizedBox(height: 8),
@@ -1414,7 +1626,11 @@ class _ProductsPageState extends State<ProductsPage> {
       _summaryLine(AppStrings.sku, item.sku.isEmpty ? AppStrings.notProvided : item.sku),
       const SizedBox(height: 8),
       Text(
-        saved ? AppStrings.savedThisSession : AppStrings.referenceUnspecified,
+        sheet
+            ? tx('sheetData', 'Sheet data')
+            : saved
+                ? AppStrings.savedThisSession
+                : AppStrings.referenceUnspecified,
         style: _text(size: 13, color: AppColors.muted, height: 1.35),
       ),
     ]);

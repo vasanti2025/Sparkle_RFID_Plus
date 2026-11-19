@@ -114,6 +114,13 @@ class InventoryStock {
   String? match(String raw) {
     final key = _norm(raw);
     if (key.isEmpty) return null;
+    final direct = _lookup(key);
+    if (direct != null) return direct;
+    if (key.startsWith('0000') && key.length > 4) return _lookup(key.substring(4));
+    return null;
+  }
+
+  String? _lookup(String key) {
     final direct = _keyToId[key];
     if (direct != null) return direct;
     final stripped = _strip(key);
@@ -140,6 +147,7 @@ class InventoryStock {
     final key = _norm(raw ?? '');
     if (key.isEmpty) return;
     _keyToId[key] = id;
+    if (key.startsWith('0000') && key.length > 4) _keyToId[key.substring(4)] = id;
     final stripped = _strip(key);
     if (stripped.isNotEmpty && stripped != key) _keyToId[stripped] = id;
   }

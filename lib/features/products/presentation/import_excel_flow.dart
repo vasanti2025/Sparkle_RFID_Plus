@@ -186,7 +186,28 @@ class _MappingDialogState extends State<_MappingDialog> {
     setState(() => _templates = templates);
     final last = prefs.getString('last_import_template');
     if (last != null) _apply(last, announce: false);
+    if (_mapping.isEmpty) _fillStandardColumns();
   }
+
+  void _fillStandardColumns() {
+    final lookup = <String, String>{};
+    for (final column in widget.columns) {
+      lookup[_columnKey(column)] = column;
+    }
+    final used = <String>{};
+    final next = <String, String>{};
+    for (final key in importFieldKeys) {
+      final label = importFieldLabels[key] ?? key;
+      final column = lookup[_columnKey(label)] ?? lookup[_columnKey(key)];
+      if (column == null || used.contains(column)) continue;
+      used.add(column);
+      next[key] = column;
+    }
+    if (next.isEmpty || !mounted) return;
+    setState(() => _mapping.addAll(next));
+  }
+
+  String _columnKey(String value) => value.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
   @override
   void dispose() {

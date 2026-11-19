@@ -194,12 +194,12 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   void _onTags(List<RfidTagInfo> batch) {
-    if (_status != 'scanning' && !_searching && !_multiSearching) return;
+    if (_status != 'scanning' && _status != 'arming' && !_searching && !_multiSearching) return;
     final expectedIds = _expected.map((item) => item.id).toSet();
     var stillOpen = expectedIds.difference(_reads).length;
     var changed = false;
     for (final tag in batch) {
-      final id = InventoryStock.instance.match(tag.epc.isNotEmpty ? tag.epc : tag.tid);
+      final id = _matchedId(tag);
       final bars = signalBars(tag.rssi);
       final target = _searching ? _piece(_searchId) : null;
       if (target != null && _hears(target, tag.epc, tag.tid)) {
@@ -234,7 +234,7 @@ class _InventoryPageState extends State<InventoryPage> {
       }
       if (id != null) continue;
       final epc = tag.epc.trim();
-      if (epc.isEmpty || _unlabelled.any((item) => item.epc == epc)) continue;
+      if (epc.isEmpty || epc.toUpperCase().startsWith('0000') || _unlabelled.any((item) => item.epc == epc)) continue;
       _unlabelled.add(
         InventoryPiece(
           id: epc,
@@ -285,7 +285,7 @@ class _InventoryPageState extends State<InventoryPage> {
       return;
     }
     await RfidService.instance.stopIfRunning();
-    await RfidService.instance.setInventoryMode(kEpcInventoryMode);
+    await RfidService.instance.setInventoryMode(1);
     final error = await RfidService.instance.startInventory();
     if (!mounted) return;
     if (error != null) {
@@ -342,9 +342,21 @@ class _InventoryPageState extends State<InventoryPage> {
     });
   }
 
+  String? _matchedId(RfidTagInfo tag) {
+    final epc = tag.epc.trim();
+    final tid = tag.tid.trim();
+    if (epc.isNotEmpty && !epc.toUpperCase().startsWith('0000')) {
+      final id = InventoryStock.instance.match(epc);
+      if (id != null) return id;
+    }
+    if (tid.isEmpty) return null;
+    return InventoryStock.instance.match(tid);
+  }
+
   bool _hears(InventoryPiece item, String epc, String tid) {
+    final heardEpc = epc.trim();
     final heard = <String>{
-      if (epc.trim().isNotEmpty) epc.trim().toUpperCase(),
+      if (heardEpc.isNotEmpty && !heardEpc.toUpperCase().startsWith('0000')) heardEpc.toUpperCase(),
       if (tid.trim().isNotEmpty) tid.trim().toUpperCase(),
     };
     final keys = <String>{
@@ -354,8 +366,9 @@ class _InventoryPageState extends State<InventoryPage> {
       if (item.tid != null && item.tid!.isNotEmpty) item.tid!.trim().toUpperCase(),
     };
     if (heard.any(keys.contains)) return true;
-    final matched = InventoryStock.instance.match(epc.isNotEmpty ? epc : tid);
-    return matched == item.id;
+    final epcId = heardEpc.isEmpty || heardEpc.toUpperCase().startsWith('0000') ? null : InventoryStock.instance.match(heardEpc);
+    if (epcId == item.id) return true;
+    return tid.trim().isNotEmpty && InventoryStock.instance.match(tid) == item.id;
   }
 
   void _openSave() {
