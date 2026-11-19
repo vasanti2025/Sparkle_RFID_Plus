@@ -58,4 +58,12 @@ abstract final class AppConstants {
       '/api/ProductMaster/GetAllStockVerificationBySession';
   static const consolidatedStockReport =
       '/api/ProductMaster/GetConsolidationStockVerificationReport';
+  static const insertLabelledStock = '/api/ProductMaster/InsertLabelledStock';
+  static const uploadProductImage = '/api/ProductMaster/UploadImagesByClientCode';
+  static const getAllCategory = '/api/ProductMaster/GetAllCategory';
+  static const getAllProductMaster = '/api/ProductMaster/GetAllProductMaster';
+  static const getAllDesign = '/api/ProductMaster/GetAllDesign';
+  static const getAllPurity = '/api/ProductMaster/GetAllPurity';
+  static const getAllPartyDetails = '/api/ProductMaster/GetAllPartyDetails';
+  static const getAllSku = '/api/ProductMaster/GetAllSKU';
 }

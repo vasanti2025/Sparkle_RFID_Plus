@@ -3,17 +3,22 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:rfid_flutter_android/rfid_flutter_android.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/locale/feature_strings.dart';
+import '../../../../core/rfid/rfid_service.dart';
+import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../desktop/presentation/pages/scan_to_desktop_page.dart';
 import '../../data/datasources/product_local_data_source.dart';
 import '../../data/product_csv.dart';
+import '../../data/single_product_save.dart';
 import '../../domain/entities/stored_record.dart';
 import '../import_excel_flow.dart';
 
@@ -81,8 +86,13 @@ class _ProductsPageState extends State<ProductsPage> {
   var _capturing = false;
   var _exporting = false;
   var _suspend = false;
+  var _readingTag = false;
+  var _saving = false;
+  var _readTicket = 0;
+  String _imagePath = '';
   String? _error;
   Timer? _timer;
+  StreamSubscription<List<RfidTagInfo>>? _readSub;
 
   static const _singleKeys = [
     'id',
@@ -139,6 +149,10 @@ class _ProductsPageState extends State<ProductsPage> {
   @override
   void dispose() {
     Injection.settings.removeListener(_onLanguage);
+    _readTicket++;
+    final reading = _readSub;
+    if (reading != null) unawaited(reading.cancel());
+    if (_readingTag) unawaited(RfidService.instance.stopInventory());
     _suspend = true;
     _timer?.cancel();
     _searchTimer?.cancel();
@@ -192,6 +206,7 @@ class _ProductsPageState extends State<ProductsPage> {
     _fields['fixedWastage']!.text = draft.fixedWastage;
     _fields['stoneAmount']!.text = draft.stoneAmount;
     _fields['diamondAmount']!.text = draft.diamondAmount;
+    _imagePath = draft.imagePath;
     _suspend = false;
   }
 
@@ -318,25 +333,73 @@ class _ProductsPageState extends State<ProductsPage> {
       controller.clear();
     }
     _suspend = false;
+    _imagePath = '';
     _session.discardDraft();
     _reloadRows();
     _goList();
   }
 
-  void _readDemoTag() {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final epc = 'E280${now.toRadixString(16).toUpperCase()}';
-    final stamp = now.toString();
-    final rfid = 'DEMO-${stamp.substring(stamp.length - 6)}';
-    _draft.epc = epc;
-    _draft.rfid = rfid;
+  Future<void> _readTag() async {
+    if (_readingTag) return;
+    final ticket = ++_readTicket;
+    setState(() => _readingTag = true);
+    final service = RfidService.instance;
+    final blocked = await service.init();
+    if (!mounted || ticket != _readTicket) return;
+    if (blocked != null) {
+      setState(() => _readingTag = false);
+      _toast(blocked);
+      return;
+    }
+    await service.stopIfRunning();
+    await service.setInventoryMode(1);
+    final found = Completer<RfidTagInfo?>();
+    await _readSub?.cancel();
+    _readSub = service.tagStream.listen((tags) {
+      if (found.isCompleted || ticket != _readTicket) return;
+      for (final tag in tags) {
+        final epc = tag.epc.trim();
+        final tid = tag.tid.trim();
+        final usable = epc.isNotEmpty && !epc.toUpperCase().startsWith('0000');
+        if (!usable && tid.isEmpty) continue;
+        if (!found.isCompleted) found.complete(tag);
+        return;
+      }
+    });
+    final error = await service.startInventory(unique: true);
+    if (!mounted || ticket != _readTicket) return;
+    if (error != null) {
+      await _finishRead(ticket);
+      if (mounted) _toast(error);
+      return;
+    }
+    final tag = await found.future.timeout(const Duration(seconds: 6), onTimeout: () => null);
+    await _finishRead(ticket);
+    if (!mounted || ticket != _readTicket) return;
+    if (tag == null) {
+      _toast(AppStrings.noTagFound);
+      return;
+    }
+    final epc = tag.epc.trim();
+    final tid = tag.tid.trim();
+    final usable = epc.isNotEmpty && !epc.toUpperCase().startsWith('0000');
+    final code = (usable ? epc : tid).toUpperCase();
     _suspend = true;
-    _fields['epc']!.text = epc;
-    _fields['rfid']!.text = rfid;
+    _fields['rfid']!.text = code;
+    if (RegExp(r'^[A-F0-9]+$').hasMatch(code)) _fields['epc']!.text = code;
     _suspend = false;
+    _draft.rfid = code;
+    if (RegExp(r'^[A-F0-9]+$').hasMatch(code)) _draft.epc = code;
     _session.dirty = true;
     setState(() {});
     _toast(AppStrings.demoIdentityRead);
+  }
+
+  Future<void> _finishRead(int ticket) async {
+    await _readSub?.cancel();
+    _readSub = null;
+    await RfidService.instance.stopInventory();
+    if (mounted && ticket == _readTicket) setState(() => _readingTag = false);
   }
 
   void _toggleCapture() {
@@ -398,16 +461,164 @@ class _ProductsPageState extends State<ProductsPage> {
     _reviewSheet(bulk: true);
   }
 
-  void _saveSingle() {
+  Future<void> _saveSingle() async {
+    if (_saving) return;
+    final errors = _session.validateSingle(_draft);
+    if (errors.isNotEmpty) {
+      setState(() => _error = errors.join('\n'));
+      return;
+    }
+    if (AppSession.clientCode.trim().isEmpty) {
+      setState(() => _error = AppStrings.signInToSaveProduct);
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final result = await saveSingleProduct(draft: _draft, imagePath: _imagePath);
+    if (!mounted) return;
+    if (result.error != null) {
+      setState(() {
+        _saving = false;
+        _error = result.error;
+      });
+      _toast(result.error!);
+      return;
+    }
+    if (result.imageUrl.isNotEmpty) _draft.imagePath = result.imageUrl;
     final record = _session.saveSingle();
-    if (record == null) return;
+    _saving = false;
+    _imagePath = '';
+    if (record == null) {
+      setState(() {});
+      _toast(result.imageSaved ? AppStrings.productAndPhotoSaved : AppStrings.productSavedLive);
+      return;
+    }
     _suspend = true;
     for (final controller in _fields.values) {
       controller.clear();
     }
     _suspend = false;
     _goList();
-    _toast(AppStrings.productSaved);
+    _toast(result.imageSaved ? AppStrings.productAndPhotoSaved : AppStrings.productSavedLive);
+  }
+
+  Future<void> _pickProductPhoto(ImageSource source) async {
+    try {
+      final photo = await ImagePicker().pickImage(source: source, imageQuality: 100);
+      if (photo == null || !mounted) return;
+      setState(() {
+        _imagePath = photo.path;
+        _draft.imagePath = photo.path;
+        _session.dirty = true;
+      });
+    } catch (_) {
+      if (mounted) _toast(AppStrings.couldNotSavePhoto);
+    }
+  }
+
+  void _photoSource() {
+    _sheet(AppStrings.productPhoto, [
+      ListTile(
+        leading: const Icon(Icons.photo_camera_outlined, color: _ink),
+        title: const Text(AppStrings.camera),
+        onTap: () {
+          Navigator.pop(context);
+          unawaited(_pickProductPhoto(ImageSource.camera));
+        },
+      ),
+      ListTile(
+        leading: const Icon(Icons.photo_library_outlined, color: _ink),
+        title: const Text(AppStrings.gallery),
+        onTap: () {
+          Navigator.pop(context);
+          unawaited(_pickProductPhoto(ImageSource.gallery));
+        },
+      ),
+    ]);
+  }
+
+  void _zoomPhoto(String path) {
+    if (path.trim().isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            title: const Text(AppStrings.productPhoto),
+          ),
+          body: InteractiveViewer(
+            minScale: 1,
+            maxScale: 6,
+            child: Center(child: _photoImage(path, BoxFit.contain)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _photoImage(String path, BoxFit fit) {
+    if (path.startsWith('http')) {
+      return Image.network(path, fit: fit);
+    }
+    return Image.file(File(path), fit: fit);
+  }
+
+  Widget _productPhoto() {
+    final path = _imagePath.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(AppStrings.productPhoto, style: _text(size: 13, weight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        if (path.isEmpty)
+          OutlinedButton.icon(
+            onPressed: _photoSource,
+            icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+            label: const Text(AppStrings.productPhoto),
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              GestureDetector(
+                onTap: () => _zoomPhoto(path),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    height: 220,
+                    width: double.infinity,
+                    child: InteractiveViewer(
+                      minScale: 1,
+                      maxScale: 4,
+                      child: _photoImage(path, BoxFit.cover),
+                    ),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _photoSource,
+                    icon: const Icon(Icons.add_a_photo_outlined, size: 18),
+                    label: const Text(AppStrings.productPhoto),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _imagePath = '';
+                      _draft.imagePath = '';
+                    }),
+                    child: const Text(AppStrings.clear),
+                  ),
+                ],
+              ),
+            ],
+          ),
+      ],
+    );
   }
 
   void _saveBulk() {
@@ -1031,6 +1242,8 @@ class _ProductsPageState extends State<ProductsPage> {
                   }
                 }),
               ),
+              _productPhoto(),
+              const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
@@ -1049,7 +1262,7 @@ class _ProductsPageState extends State<ProductsPage> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: TextButton.icon(
-                      onPressed: _readDemoTag,
+                      onPressed: _readingTag ? null : () => unawaited(_readTag()),
                       icon: const Icon(Icons.document_scanner_outlined, size: 18),
                       label: const Text(AppStrings.readDemoTag),
                     ),
@@ -1102,6 +1315,7 @@ class _ProductsPageState extends State<ProductsPage> {
                   Text(AppStrings.calculationNote, style: _text(size: 12, color: AppColors.muted)),
                 ],
               ),
+              if (_saving) const LinearProgressIndicator(color: _ink, minHeight: 2),
               if (_error != null) _errorText(_error!),
             ],
           ),
@@ -1624,6 +1838,24 @@ class _ProductsPageState extends State<ProductsPage> {
       _summaryLine(AppStrings.purity, item.purity.isEmpty ? AppStrings.notProvided : item.purity),
       _summaryLine(AppStrings.vendor, item.vendor.isEmpty ? AppStrings.notProvided : item.vendor),
       _summaryLine(AppStrings.sku, item.sku.isEmpty ? AppStrings.notProvided : item.sku),
+      if (item.imagePath.trim().isNotEmpty) ...[
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: () => _zoomPhoto(item.imagePath),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 180,
+              width: double.infinity,
+              child: InteractiveViewer(
+                minScale: 1,
+                maxScale: 4,
+                child: _photoImage(item.imagePath, BoxFit.cover),
+              ),
+            ),
+          ),
+        ),
+      ],
       const SizedBox(height: 8),
       Text(
         sheet
@@ -1662,23 +1894,27 @@ class _ProductsPageState extends State<ProductsPage> {
       Text(AppStrings.checkEachCode, style: _text(size: 13, color: AppColors.muted)),
       const SizedBox(height: 12),
       FilledButton.icon(
-        onPressed: () {
-          Navigator.pop(context);
-          if (bulk) {
-            _saveBulk();
-          } else {
-            _saveSingle();
-          }
-        },
+        onPressed: _saving
+            ? null
+            : () {
+                Navigator.pop(context);
+                if (bulk) {
+                  _saveBulk();
+                } else {
+                  unawaited(_saveSingle());
+                }
+              },
         style: FilledButton.styleFrom(
           backgroundColor: _ink,
           minimumSize: const Size.fromHeight(48),
         ),
         icon: const Icon(Icons.save_outlined),
-        label: Text(bulk ? AppStrings.saveDemoBatch : AppStrings.saveDemoProduct),
+        label: Text(bulk ? AppStrings.saveDemoBatch : AppStrings.saveProduct),
       ),
-      const SizedBox(height: 8),
-      Text(AppStrings.savedSessionOnly, style: _text(size: 12, color: AppColors.muted)),
+      if (bulk) ...[
+        const SizedBox(height: 8),
+        Text(AppStrings.savedSessionOnly, style: _text(size: 12, color: AppColors.muted)),
+      ],
     ]);
   }
 

@@ -20,6 +20,7 @@ class ProductDraft {
   String fixedWastage = '';
   String stoneAmount = '';
   String diamondAmount = '';
+  String imagePath = '';
 }
 
 class BulkPiece {
@@ -44,6 +45,7 @@ class CataloguePiece {
     this.grossMg,
     this.netMg,
     this.origin = 'reference',
+    this.imagePath = '',
   });
 
   final String id;
@@ -58,6 +60,7 @@ class CataloguePiece {
   final int? grossMg;
   final int? netMg;
   final String origin;
+  final String imagePath;
 }
 
 class SyncActivity {
@@ -343,6 +346,7 @@ class ProductDemoSession {
       grossMg: _milligrams(input.gross),
       netMg: _milligrams(input.net),
       origin: origin,
+      imagePath: input.imagePath.trim(),
     );
   }
 

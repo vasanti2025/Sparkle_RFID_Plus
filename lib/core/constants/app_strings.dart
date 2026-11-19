@@ -345,7 +345,17 @@ abstract final class AppStrings {
   static const itemCodeExample = 'e.g. SM011';
   static const tagIdentity = 'Tag identity';
   static const epc = 'EPC';
-  static const readDemoTag = 'Read a demo tag';
+  static const readDemoTag = 'Read a tag';
+  static const productPhoto = 'Product photo';
+  static const camera = 'Camera';
+  static const gallery = 'Gallery';
+  static const noTagFound = 'No tag found.';
+  static const signInToSaveProduct = 'Sign in to save the product.';
+  static const couldNotSaveProduct = 'Could not save the product.';
+  static const couldNotSavePhoto = 'Could not save the photo.';
+  static const productSavedLive = 'Product saved.';
+  static const productAndPhotoSaved = 'Product and photo saved.';
+  static const saveProduct = 'Save product';
   static const weights = 'Weights';
   static const grossWeightG = 'Gross weight (g)';
   static const netWeightG = 'Net weight (g)';
@@ -496,7 +506,7 @@ abstract final class AppStrings {
   static const optionAdded = 'Option added to demo master data.';
   static const chooseClass = 'Choose a field and enter its value.';
   static const chooseShared = 'Choose category, product and design.';
-  static const demoIdentityRead = 'Demo identity read. Check the physical piece.';
+  static const demoIdentityRead = 'Tag read.';
   static const productSaved = 'Product saved in this demo.';
   static const productsSaved = 'products saved in this demo.';
   static const saveOrDiscardImport =
