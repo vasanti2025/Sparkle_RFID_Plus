@@ -214,14 +214,52 @@ class QuotationRemoteDataSource {
 
   QuotationSummary _summary(Map<String, dynamic> row) {
     final customer = _customerName(row);
-    final net = _text(row, const ['TotalNetAmount']);
+    final netAmount = _text(row, const ['TotalNetAmount']);
     final total = _text(row, const ['TotalAmount']);
+    final items = _itemRows(row);
+    final qty = _text(row, const ['Qty', 'QuotationCount', 'Pieces', 'TotalPieces']);
+    final pieces = int.tryParse(qty.split('.').first) ?? (items.isEmpty ? 0 : items.length);
+    var gross = _text(row, const ['GrossWt', 'GrossWeight', 'TotalGrossWt']);
+    var net = _text(row, const ['NetWt', 'NetWeight', 'TotalNetWt']);
+    if (gross.isEmpty && items.isNotEmpty) gross = _sumText(items, const ['GrossWt', 'GrossWeight']);
+    if (net.isEmpty && items.isNotEmpty) net = _sumText(items, const ['NetWt', 'NetWeight']);
     return QuotationSummary(
       id: _int(row['Id'] ?? row['QuotationId']),
       number: _text(row, const ['QuotationNo', 'QuotationNumber']),
       customerName: customer,
-      amount: net.isNotEmpty ? net : total,
+      amount: netAmount.isNotEmpty ? netAmount : total,
+      branch: _branchName(row),
+      date: _text(row, const ['QuotationDate', 'Date', 'CreatedOn']),
+      pieces: pieces,
+      gross: gross,
+      net: net,
     );
+  }
+
+  String _branchName(Map<String, dynamic> row) {
+    final named = _clean(_text(row, const ['BranchName', 'Branch']));
+    if (named.isNotEmpty && int.tryParse(named) == null) return named;
+    for (final key in const ['Branch', 'branch', 'BranchDetails']) {
+      final nested = row[key];
+      if (nested is! Map) continue;
+      final value = _clean(_text(Map<String, dynamic>.from(nested), const ['BranchName', 'Name']));
+      if (value.isNotEmpty) return value;
+    }
+    return int.tryParse(named) == null ? named : '';
+  }
+
+  String _sumText(List<Map<String, dynamic>> rows, List<String> keys) {
+    var total = 0.0;
+    var found = false;
+    for (final row in rows) {
+      final text = _text(row, keys);
+      final value = double.tryParse(text);
+      if (value == null) continue;
+      total += value;
+      found = true;
+    }
+    if (!found) return '';
+    return total.toStringAsFixed(3);
   }
 
   String _nestedText(Map<String, dynamic> row, List<String> keys) {

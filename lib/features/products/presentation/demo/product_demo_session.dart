@@ -151,6 +151,7 @@ class ProductDemoSession {
   List<String> validateSingle(
     ProductDraft input, {
     List<CataloguePiece> extra = const [],
+    bool catalogue = true,
   }) {
     final id = input.id.trim().toUpperCase();
     final epc = input.epc.trim().toUpperCase();
@@ -160,7 +161,7 @@ class ProductDemoSession {
     if (input.category.trim().isEmpty) errors.add(AppStrings.chooseACategory);
     if (input.name.trim().isEmpty) errors.add(AppStrings.chooseAProduct);
     if (input.design.trim().isEmpty) errors.add(AppStrings.chooseADesign);
-    final pool = [...items, ...extra];
+    final pool = [...(catalogue ? items : const <CataloguePiece>[]), ...extra];
     if (id.isNotEmpty && pool.any((item) => item.id.toUpperCase() == id)) {
       errors.add(AppStrings.itemCodeUsed);
     }
@@ -219,7 +220,7 @@ class ProductDemoSession {
         ..id = row.id
         ..rfid = row.rfid
         ..epc = row.epc;
-      for (final error in validateSingle(draft, extra: seen)) {
+      for (final error in validateSingle(draft, extra: seen, catalogue: false)) {
         errors.add('${AppStrings.rowLabel} ${i + 1}: $error');
       }
       seen.add(_pieceFrom(draft));

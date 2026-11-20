@@ -14,6 +14,7 @@ import '../../../../core/di/injection.dart';
 import '../../../../core/locale/feature_strings.dart';
 import '../../../../core/rfid/rfid_service.dart';
 import '../../../../core/session/app_session.dart';
+import '../../../inventory/data/inventory_stock.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../desktop/presentation/pages/scan_to_desktop_page.dart';
 import '../../data/datasources/product_local_data_source.dart';
@@ -76,6 +77,7 @@ class _ProductsPageState extends State<ProductsPage> {
   final _storedScroll = ScrollController();
   final _stored = <CataloguePiece>[];
   var _sheetCatalogue = false;
+  var _catalogueSource = '';
   var _storedTotal = 0;
   var _storedLoading = false;
   var _storedTicket = 0;
@@ -88,6 +90,15 @@ class _ProductsPageState extends State<ProductsPage> {
   var _suspend = false;
   var _readingTag = false;
   var _saving = false;
+  var _sharedOpen = false;
+  var _copyItem = false;
+  var _copyRfid = false;
+  var _radioOn = false;
+  var _barcodeOn = false;
+  int? _scanRow;
+  int? _selectedRow;
+  int? _rfidFocus;
+  StreamSubscription<RfidBarcodeInfo>? _barcodeSub;
   var _readTicket = 0;
   String _imagePath = '';
   String? _error;
@@ -152,7 +163,8 @@ class _ProductsPageState extends State<ProductsPage> {
     _readTicket++;
     final reading = _readSub;
     if (reading != null) unawaited(reading.cancel());
-    if (_readingTag) unawaited(RfidService.instance.stopInventory());
+    if (_readingTag || _radioOn) unawaited(RfidService.instance.stopInventory());
+    unawaited(_stopBarcode());
     _suspend = true;
     _timer?.cancel();
     _searchTimer?.cancel();
@@ -180,6 +192,14 @@ class _ProductsPageState extends State<ProductsPage> {
     _timer?.cancel();
     _timer = null;
     _capturing = false;
+    _scanRow = null;
+    final reading = _readSub;
+    _readSub = null;
+    if (reading != null) unawaited(reading.cancel());
+    if (_radioOn) {
+      _radioOn = false;
+      unawaited(RfidService.instance.stopInventory());
+    }
   }
 
   void _pauseSync() {
@@ -254,11 +274,14 @@ class _ProductsPageState extends State<ProductsPage> {
     }
     _rows
       ..clear()
-      ..addAll(_session.bulkRows.map((piece) => _RowEditors(piece, _session)));
+      ..addAll(_session.bulkRows.map((piece) => _RowEditors(piece, _session, onEdit: () {
+        if (_rows.isNotEmpty && identical(piece, _rows.first.piece)) _copyFromFirst();
+      })));
   }
 
   void _goList() {
     _stopCapture();
+    unawaited(_stopBarcode());
     setState(() {
       _page = _ProductPage.list;
       _error = null;
@@ -373,6 +396,7 @@ class _ProductsPageState extends State<ProductsPage> {
       if (mounted) _toast(error);
       return;
     }
+    _radioOn = true;
     final tag = await found.future.timeout(const Duration(seconds: 6), onTimeout: () => null);
     await _finishRead(ticket);
     if (!mounted || ticket != _readTicket) return;
@@ -398,36 +422,182 @@ class _ProductsPageState extends State<ProductsPage> {
   Future<void> _finishRead(int ticket) async {
     await _readSub?.cancel();
     _readSub = null;
-    await RfidService.instance.stopInventory();
+    final radio = _radioOn;
+    _radioOn = false;
+    _scanRow = null;
+    if (radio) await RfidService.instance.stopInventory();
     if (mounted && ticket == _readTicket) setState(() => _readingTag = false);
   }
 
-  void _toggleCapture() {
+  Future<void> _toggleCapture() async {
     if (_capturing) {
       setState(_stopCapture);
       return;
     }
-    if (_session.bulkCategory.isEmpty ||
-        _session.bulkName.isEmpty ||
-        _session.bulkDesign.isEmpty) {
-      _classifySheet();
+    _scanRow = null;
+    final started = await _armReader(multi: true);
+    if (!started || !mounted) return;
+    setState(() => _capturing = true);
+  }
+
+  Future<void> _startSingleScan() async {
+    if (_scanRow != null && _radioOn && !_capturing) {
+      setState(_stopCapture);
       return;
     }
-    _stopCapture();
-    setState(() => _capturing = true);
-    _timer = Timer.periodic(const Duration(milliseconds: 1300), (_) {
-      if (!mounted) return;
-      if (_session.bulkRows.length >= 5) {
-        setState(_stopCapture);
-        return;
-      }
-      final stamp = DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase();
-      final piece = BulkPiece(
-        epc: 'E280$stamp',
-        rfid: 'DEMO-${stamp.substring(stamp.length - 5)}',
-      );
-      setState(() => _addPiece(piece));
+    if (_capturing) setState(_stopCapture);
+    final selected = _selectedRow;
+    if (selected == null || selected >= _rows.length) {
+      setState(() {
+        _addPiece(BulkPiece());
+        if (_copyItem) _copyFromFirst();
+      });
+      await _scanOneRow(_rows.length - 1);
+      return;
+    }
+    await _scanOneRow(selected);
+  }
+
+  void _addManualRow() {
+    setState(() {
+      _addPiece(BulkPiece());
+      if (_copyItem) _copyFromFirst();
+      _selectedRow = _rows.length - 1;
     });
+  }
+
+  void _removeSelectedRow() {
+    if (_rows.isEmpty) return;
+    final index = _selectedRow != null && _selectedRow! < _rows.length ? _selectedRow! : _rows.length - 1;
+    final row = _rows[index];
+    row.dispose();
+    setState(() {
+      _rows.removeAt(index);
+      _session.bulkRows.removeAt(index);
+      _session.dirty = true;
+      _selectedRow = _rows.isEmpty ? null : index.clamp(0, _rows.length - 1);
+      if (_rfidFocus != null && (_rfidFocus! >= _rows.length)) _rfidFocus = _selectedRow;
+    });
+  }
+
+  Future<void> _armBarcode(int index) async {
+    _rfidFocus = index;
+    if (_radioOn || _capturing) return;
+    try {
+      final decoder = BarcodeDecoder.instance;
+      final ready = await decoder.init();
+      if (!ready.isEffective || !mounted) return;
+      _barcodeSub ??= decoder.barcodeStream.listen(_onBarcode);
+      if (_barcodeOn) return;
+      final started = await decoder.startScan();
+      _barcodeOn = started.isEffective;
+    } catch (_) {}
+  }
+
+  void _onBarcode(RfidBarcodeInfo info) {
+    final index = _rfidFocus;
+    if (!mounted || index == null || index >= _rows.length) return;
+    final code = info.barcode.trim().toUpperCase();
+    if (code.isEmpty) return;
+    final row = _rows[index];
+    if (row.rfid.text != code) row.rfid.text = code;
+    if (_copyRfid && index == 0) _copyFromFirst();
+    setState(() => _selectedRow = index);
+    unawaited(_stopBarcode());
+  }
+
+  Future<void> _stopBarcode() async {
+    _barcodeOn = false;
+    final reading = _barcodeSub;
+    _barcodeSub = null;
+    if (reading != null) await reading.cancel();
+    try {
+      await BarcodeDecoder.instance.stopScan();
+    } catch (_) {}
+  }
+
+  Future<void> _scanOneRow(int index) async {
+    if (_capturing) setState(_stopCapture);
+    _scanRow = index;
+    final started = await _armReader(multi: false);
+    if (!mounted) return;
+    if (!started) _scanRow = null;
+    setState(() {});
+  }
+
+  Future<bool> _armReader({required bool multi}) async {
+    final ticket = ++_readTicket;
+    final service = RfidService.instance;
+    final blocked = await service.init();
+    if (!mounted || ticket != _readTicket) return false;
+    if (blocked != null) {
+      _toast(blocked);
+      return false;
+    }
+    await _stopBarcode();
+    await service.stopIfRunning();
+    await service.setInventoryMode(1);
+    final reading = _readSub;
+    _readSub = null;
+    if (reading != null) await reading.cancel();
+    _readSub = service.tagStream.listen((tags) {
+      if (ticket != _readTicket || !mounted) return;
+      var changed = false;
+      for (final tag in tags) {
+        final epc = tag.epc.trim();
+        final tid = tag.tid.trim();
+        final usable = epc.isNotEmpty && !epc.toUpperCase().startsWith('0000');
+        final code = (usable ? epc : tid).trim().toUpperCase();
+        if (code.isEmpty) continue;
+        final storedEpc = usable ? epc.toUpperCase() : code;
+        if (!multi) {
+          final index = _scanRow;
+          if (index == null || index >= _rows.length) continue;
+          _rows[index].piece.epc = storedEpc;
+          if (_copyItem) _copyFromFirst();
+          unawaited(_finishRead(ticket));
+          changed = true;
+          break;
+        }
+        if (_addPiece(BulkPiece(epc: storedEpc))) {
+          if (_copyItem) _copyFromFirst();
+          changed = true;
+        }
+      }
+      if (changed) setState(() {});
+    });
+    final error = await service.startInventory(unique: true);
+    if (!mounted || ticket != _readTicket) return false;
+    if (error != null) {
+      await _finishRead(ticket);
+      if (mounted) _toast(error);
+      return false;
+    }
+    _radioOn = true;
+    if (!multi) {
+      _timer?.cancel();
+      _timer = Timer(const Duration(seconds: 6), () {
+        if (ticket == _readTicket) unawaited(_finishRead(ticket));
+      });
+    }
+    return true;
+  }
+
+  void _copyFromFirst() {
+    if (_rows.isEmpty) return;
+    final first = _rows.first;
+    if (_copyItem) {
+      final value = first.id.text;
+      for (var i = 1; i < _rows.length; i++) {
+        if (_rows[i].id.text != value) _rows[i].id.text = value;
+      }
+    }
+    if (_copyRfid) {
+      final value = first.rfid.text;
+      for (var i = 1; i < _rows.length; i++) {
+        if (_rows[i].rfid.text != value) _rows[i].rfid.text = value;
+      }
+    }
   }
 
   bool _addPiece(BulkPiece piece) {
@@ -436,7 +606,9 @@ class _ProductsPageState extends State<ProductsPage> {
       return false;
     }
     _session.bulkRows.add(piece);
-    _rows.add(_RowEditors(piece, _session));
+    _rows.add(_RowEditors(piece, _session, onEdit: () {
+      if (_rows.isNotEmpty && identical(piece, _rows.first.piece)) _copyFromFirst();
+    }));
     _session.dirty = true;
     return true;
   }
@@ -621,30 +793,47 @@ class _ProductsPageState extends State<ProductsPage> {
     );
   }
 
-  void _saveBulk() {
-    final records = _session.saveBulk();
-    if (records == null) return;
-    _reloadRows();
-    _goList();
-    _toast('${records.length} ${AppStrings.productsSaved}');
-  }
-
-  void _loadSample() {
-    _session.mode = 'bulk';
-    _session.bulkCategory = 'GOLD';
-    _session.bulkName = 'Necklace';
-    _session.bulkDesign = 'Abstract';
-    _session.bulkRows
-      ..clear()
-      ..add(BulkPiece(id: 'DEMO-IMPORT-01', rfid: 'DEMO-I001'))
-      ..add(BulkPiece(id: 'DEMO-IMPORT-02', rfid: 'DEMO-I002'))
-      ..add(BulkPiece(id: 'GNK53'));
-    _session.dirty = true;
-    _reloadRows();
+  Future<void> _saveBulk() async {
+    if (_saving) return;
+    final errors = _session.validateBulk();
+    if (errors.isNotEmpty) {
+      setState(() => _error = errors.join('\n'));
+      return;
+    }
     setState(() {
-      _page = _ProductPage.bulk;
-      _error = AppStrings.sampleImportError;
+      _saving = true;
+      _error = null;
     });
+    final items = [
+      for (final row in _session.bulkRows)
+        <String, dynamic>{
+          'ItemCode': row.id.trim(),
+          'RFIDCode': row.rfid.trim(),
+          'EPC': row.epc.trim(),
+          'TIDNumber': row.epc.trim(),
+          'CategoryName': _session.bulkCategory.trim(),
+          'ProductName': _session.bulkName.trim(),
+          'DesignName': _session.bulkDesign.trim(),
+        },
+    ];
+    try {
+      await Injection.productRepository.saveBulkProducts(items);
+      await InventoryStock.instance.load();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast(AppStrings.couldNotSaveProduct);
+      return;
+    }
+    if (!mounted) return;
+    _stopCapture();
+    _session.bulkRows.clear();
+    _reloadRows();
+    _session.dirty = false;
+    _saving = false;
+    _goList();
+    unawaited(_reloadStored());
+    _toast(AppStrings.productSavedLive);
   }
 
   Future<void> _exportProducts(String mode) async {
@@ -897,11 +1086,13 @@ class _ProductsPageState extends State<ProductsPage> {
     if (!Injection.ready) return;
     final ticket = ++_storedTicket;
     final prefs = await SharedPreferences.getInstance();
-    final sheet = prefs.getString(productCatalogueSourceKey) == productCatalogueSheet;
-    if (!sheet) {
+    final source = prefs.getString(productCatalogueSourceKey) ?? '';
+    final local = source == productCatalogueSheet || source == productCatalogueBulk || source == productCatalogueServer;
+    if (!local) {
       if (!mounted || ticket != _storedTicket) return;
       setState(() {
         _sheetCatalogue = false;
+        _catalogueSource = '';
         _storedTotal = 0;
         _stored.clear();
       });
@@ -913,10 +1104,11 @@ class _ProductsPageState extends State<ProductsPage> {
     if (!mounted || ticket != _storedTicket) return;
     setState(() {
       _sheetCatalogue = true;
+      _catalogueSource = source;
       _storedTotal = total;
       _stored
         ..clear()
-        ..addAll(page.map(_pieceFromStored));
+        ..addAll(page.map((record) => _pieceFromStored(record, source)));
     });
   }
 
@@ -933,10 +1125,11 @@ class _ProductsPageState extends State<ProductsPage> {
     );
     _storedLoading = false;
     if (!mounted || ticket != _storedTicket || page.isEmpty) return;
-    setState(() => _stored.addAll(page.map(_pieceFromStored)));
+    final source = _stored.isEmpty ? 'sheet' : _stored.first.origin;
+    setState(() => _stored.addAll(page.map((record) => _pieceFromStored(record, source))));
   }
 
-  CataloguePiece _pieceFromStored(StoredRecord record) {
+  CataloguePiece _pieceFromStored(StoredRecord record, String origin) {
     String? text(List<String> keys) {
       for (final key in keys) {
         final value = record.payload[key]?.toString().trim();
@@ -964,7 +1157,7 @@ class _ProductsPageState extends State<ProductsPage> {
       sku: text(const ['SKU', 'Sku']) ?? '',
       grossMg: milligrams(text(const ['GrossWeight'])),
       netMg: milligrams(text(const ['NetWeight'])),
-      origin: 'sheet',
+      origin: origin,
     );
   }
 
@@ -1081,7 +1274,10 @@ class _ProductsPageState extends State<ProductsPage> {
                           style: _text(size: 10, weight: FontWeight.w600, color: _demoInk),
                         ),
                         const Spacer(),
-                        _tag(tx('sheetData', 'Sheet data')),
+                        if (_catalogueSource == productCatalogueSheet)
+                          _tag(tx('sheetData', 'Sheet data'))
+                        else if (_catalogueSource == productCatalogueBulk)
+                          _tag('Bulk'),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -1186,9 +1382,13 @@ class _ProductsPageState extends State<ProductsPage> {
                   Text(
                     sheet
                         ? tx('sheetData', 'Sheet data')
-                        : saved
-                            ? AppStrings.savedOnDeviceDemo
-                            : AppStrings.referenceItemDemo,
+                        : item.origin == productCatalogueBulk
+                            ? 'Bulk'
+                            : saved
+                                ? AppStrings.savedOnDeviceDemo
+                                : item.origin == productCatalogueServer
+                                    ? item.category
+                                    : AppStrings.referenceItemDemo,
                     style: _text(size: 10, color: _status),
                   ),
                 ],
@@ -1335,141 +1535,242 @@ class _ProductsPageState extends State<ProductsPage> {
       _session.bulkName,
       _session.bulkDesign,
     ].where((value) => value.isNotEmpty).join(' · ');
+    final singleBusy = _scanRow != null && _radioOn;
     return Column(
       children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _capturing ? AppStrings.readingDemoTags : AppStrings.bulkProductEntry,
-                      style: _text(size: 10, weight: FontWeight.w600, color: _demoInk),
-                    ),
-                  ),
-                  _tag(AppStrings.demoTag),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _card(
-                onTap: _classifySheet,
-                fill: _classFill,
-                border: _classLine,
-                radius: 12,
-                child: Row(
-                  children: [
-                    const Icon(Icons.layers_outlined, color: _captureInk),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _session.bulkCategory.isEmpty
-                                ? AppStrings.setSharedDetails
-                                : _session.bulkCategory,
-                            style: _text(size: 15, weight: FontWeight.w700),
-                          ),
-                          Text(
-                            shared.isEmpty ? AppStrings.classificationHint : shared,
-                            style: _text(size: 12, color: AppColors.muted),
-                          ),
-                        ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: _card(
+            onTap: () => setState(() => _sharedOpen = !_sharedOpen),
+            fill: _classFill,
+            border: _classLine,
+            radius: 12,
+            child: Row(
+              children: [
+                const Icon(Icons.layers_outlined, color: _captureInk),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _session.bulkCategory.isEmpty
+                            ? AppStrings.setSharedDetails
+                            : _session.bulkCategory,
+                        style: _text(size: 15, weight: FontWeight.w700),
                       ),
-                    ),
-                    const Icon(Icons.chevron_right, color: _chevron),
-                  ],
+                      Text(
+                        shared.isEmpty ? AppStrings.classificationHint : shared,
+                        style: _text(size: 12, color: AppColors.muted),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              if (_capturing) ...[
-                const SizedBox(height: 10),
-                Text(AppStrings.readingOnce, style: _text(size: 13, weight: FontWeight.w600)),
+                const Icon(Icons.chevron_right, color: _chevron),
               ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Text(
-                    AppStrings.piecesToAdd,
-                    style: _text(size: 12, weight: FontWeight.w700, letterSpacing: 0.6),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${_rows.length} ${AppStrings.rowsWord}',
-                    style: _text(size: 12, color: AppColors.muted),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              if (_rows.isEmpty)
-                _empty(AppStrings.readyForBatch, AppStrings.scanOrAddRows)
-              else
-                for (var i = 0; i < _rows.length; i++) _bulkCard(i),
-              OutlinedButton.icon(
-                onPressed: () => setState(() => _addPiece(BulkPiece())),
-                icon: const Icon(Icons.add),
-                label: const Text(AppStrings.addRowManually),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 8),
-                _errorText(_error!),
-              ],
-            ],
+            ),
           ),
         ),
-        _footer(
-          label: _capturing ? AppStrings.pause : AppStrings.scan,
-          icon: _capturing ? Icons.pause : Icons.document_scanner_outlined,
-          onPressed: _toggleCapture,
-          secondary: AppStrings.reviewBatch,
-          onSecondary: _rows.isEmpty ? null : _reviewBulk,
-          note: AppStrings.duplicatesBlocked,
+        _bulkHeader(),
+        Expanded(
+          child: _rows.isEmpty
+              ? _empty(AppStrings.readyForBatch, AppStrings.scanOrAddRows)
+              : ListView.builder(
+                  itemCount: _rows.length,
+                  itemBuilder: (context, index) => _bulkRow(index),
+                ),
+        ),
+        if (_error != null) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: _errorText(_error!)),
+        if (_sharedOpen)
+          Material(
+            color: AppColors.white,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Column(
+                children: [
+                  _classDropdowns(
+                    category: _session.bulkCategory,
+                    name: _session.bulkName,
+                    design: _session.bulkDesign,
+                    onChanged: (key, value) => setState(() {
+                      _session.dirty = true;
+                      if (key == 'category') _session.bulkCategory = value;
+                      if (key == 'name') _session.bulkName = value;
+                      if (key == 'design') _session.bulkDesign = value;
+                    }),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _masterSheet,
+                      icon: const Icon(Icons.add, size: 18),
+                      label: const Text(AppStrings.addClassification),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (_saving) const LinearProgressIndicator(color: _ink, minHeight: 2),
+        Container(
+          decoration: const BoxDecoration(
+            color: AppColors.white,
+            border: Border(top: BorderSide(color: _line)),
+          ),
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+          child: Row(
+            children: [
+              _barAction(Icons.add, 'Add', _addManualRow),
+              _barAction(Icons.remove, 'Remove', _rows.isEmpty ? null : _removeSelectedRow),
+              _barAction(
+                singleBusy ? Icons.close : Icons.qr_code_scanner,
+                singleBusy ? AppStrings.pause : AppStrings.scan,
+                () => unawaited(_startSingleScan()),
+              ),
+              _barAction(
+                _capturing ? Icons.close : Icons.radio_button_checked,
+                _capturing ? AppStrings.pause : AppStrings.gscan,
+                () => unawaited(_toggleCapture()),
+              ),
+              _barAction(Icons.fact_check_outlined, AppStrings.reviewBatch, _rows.isEmpty ? null : _reviewBulk),
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _bulkCard(int index) {
+  Widget _barAction(IconData icon, String label, VoidCallback? onPressed) {
+    final enabled = onPressed != null;
+    return Expanded(
+      child: InkWell(
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20, color: enabled ? _ink : const Color(0xFFC8C2B6)),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: _text(size: 9, weight: FontWeight.w600, color: enabled ? _ink : const Color(0xFFC8C2B6)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bulkHeader() {
+    return Container(
+      color: _ink,
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 36,
+            child: Text('Sr', textAlign: TextAlign.center, style: _text(size: 12, weight: FontWeight.w700, color: AppColors.white)),
+          ),
+          _headerCheck(AppStrings.itemCode, _copyItem, (value) {
+            setState(() => _copyItem = value);
+            if (value) _copyFromFirst();
+          }),
+          _headerCheck(AppStrings.rfidCode, _copyRfid, (value) {
+            setState(() => _copyRfid = value);
+            if (value) _copyFromFirst();
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _headerCheck(String label, bool checked, ValueChanged<bool> onChanged) {
+    return Expanded(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Checkbox(
+              value: checked,
+              activeColor: AppColors.white,
+              checkColor: const Color(0xFF424242),
+              side: BorderSide(color: AppColors.white.withValues(alpha: checked ? 1 : 0.7), width: 1.5),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: (value) => onChanged(value ?? false),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: _text(size: 12, weight: FontWeight.w700, color: AppColors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bulkRow(int index) {
     final row = _rows[index];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: _card(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+    final selected = _selectedRow == index;
+    return Column(
+      children: [
+        Material(
+          color: selected ? const Color(0xFFF8F2E6) : AppColors.white,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            child: Row(
               children: [
-                Text(
-                  '${AppStrings.piece} ${index + 1}',
-                  style: _text(size: 14, weight: FontWeight.w700),
+                SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: Center(child: Text('${index + 1}', style: _text(size: 11, color: const Color(0xFF424242)))),
                 ),
-                const Spacer(),
-                IconButton(
-                  tooltip: AppStrings.removePiece,
-                  onPressed: () {
-                    row.dispose();
-                    setState(() {
-                      _rows.removeAt(index);
-                      _session.bulkRows.removeAt(index);
-                      _session.dirty = true;
-                    });
-                  },
-                  icon: const Icon(Icons.close, size: 18),
+                Expanded(child: _inlineField(row.id, onTap: () => setState(() => _selectedRow = index))),
+                Expanded(
+                  child: _inlineField(
+                    row.rfid,
+                    onTap: () {
+                      setState(() => _selectedRow = index);
+                      unawaited(_armBarcode(index));
+                    },
+                  ),
                 ),
               ],
             ),
-            _field(AppStrings.itemCodeRequired, row.id),
-            const SizedBox(height: 8),
-            _field(AppStrings.rfidCode, row.rfid),
-            if (row.piece.epc.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(
-                '${AppStrings.epc} ${row.piece.epc}',
-                style: _text(size: 12, color: AppColors.muted),
-              ),
-            ],
-          ],
+          ),
+        ),
+        const Divider(height: 1, thickness: 0.6, color: Color(0xFFE3DDD1)),
+      ],
+    );
+  }
+
+  Widget _inlineField(TextEditingController controller, {VoidCallback? onTap}) {
+    return SizedBox(
+      height: 36,
+      child: TextField(
+        controller: controller,
+        onTap: onTap,
+        textAlign: TextAlign.center,
+        textCapitalization: TextCapitalization.characters,
+        style: _text(size: 12, color: const Color(0xFF424242)),
+        decoration: const InputDecoration(
+          isDense: true,
+          contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          filled: false,
         ),
       ),
     );
@@ -1533,7 +1834,7 @@ class _ProductsPageState extends State<ProductsPage> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: _card(
-                    onTap: () => _syncMethodSheet(option),
+                    onTap: () => option.id == 'sheet' ? _openExcelImport() : _syncMethodSheet(option),
                     child: Row(
                       children: [
                         const Icon(Icons.sync, color: _gold),
@@ -1681,7 +1982,7 @@ class _ProductsPageState extends State<ProductsPage> {
         subtitle: AppStrings.importExcelHint,
         onTap: () {
           Navigator.pop(context);
-          _importSheet();
+          _openExcelImport();
         },
       ),
     ]);
@@ -1705,9 +2006,7 @@ class _ProductsPageState extends State<ProductsPage> {
         subtitle: tx('importExcelHint', AppStrings.importExcelHint),
         onTap: () {
           Navigator.pop(context);
-          unawaited(ImportExcelFlow.start(context).whenComplete(() {
-            if (mounted) unawaited(_reloadStored());
-          }));
+          _openExcelImport();
         },
       ),
       _choice(
@@ -1756,13 +2055,27 @@ class _ProductsPageState extends State<ProductsPage> {
           _goList();
         },
       ),
+      if (_page == _ProductPage.bulk)
+        _choice(
+          icon: Icons.fact_check_outlined,
+          title: AppStrings.reviewBatch,
+          subtitle: AppStrings.duplicatesBlocked,
+          onTap: () {
+            Navigator.pop(context);
+            _reviewBulk();
+          },
+        ),
       _choice(
         icon: Icons.document_scanner_outlined,
         title: AppStrings.gscan,
         subtitle: AppStrings.gscanNote,
         onTap: () {
           Navigator.pop(context);
-          _previewSheet(AppStrings.gscan, AppStrings.gscanNote, Icons.document_scanner_outlined);
+          if (_page == _ProductPage.bulk) {
+            unawaited(_toggleCapture());
+          } else {
+            _previewSheet(AppStrings.gscan, AppStrings.gscanNote, Icons.document_scanner_outlined);
+          }
         },
       ),
       _choice(
@@ -1860,9 +2173,11 @@ class _ProductsPageState extends State<ProductsPage> {
       Text(
         sheet
             ? tx('sheetData', 'Sheet data')
-            : saved
-                ? AppStrings.savedThisSession
-                : AppStrings.referenceUnspecified,
+            : item.origin == productCatalogueBulk
+                ? 'Bulk'
+                : saved
+                    ? AppStrings.savedThisSession
+                    : AppStrings.referenceUnspecified,
         style: _text(size: 13, color: AppColors.muted, height: 1.35),
       ),
     ]);
@@ -1899,7 +2214,7 @@ class _ProductsPageState extends State<ProductsPage> {
             : () {
                 Navigator.pop(context);
                 if (bulk) {
-                  _saveBulk();
+                  unawaited(_saveBulk());
                 } else {
                   unawaited(_saveSingle());
                 }
@@ -1916,6 +2231,12 @@ class _ProductsPageState extends State<ProductsPage> {
         Text(AppStrings.savedSessionOnly, style: _text(size: 12, color: AppColors.muted)),
       ],
     ]);
+  }
+
+  void _openExcelImport() {
+    unawaited(ImportExcelFlow.start(context).whenComplete(() {
+      if (mounted) unawaited(_reloadStored());
+    }));
   }
 
   void _syncMethodSheet(SyncMethod method) {
@@ -1947,74 +2268,6 @@ class _ProductsPageState extends State<ProductsPage> {
     ]);
   }
 
-  void _classifySheet() {
-    var category = _session.bulkCategory;
-    var name = _session.bulkName;
-    var design = _session.bulkDesign;
-    String? error;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _surface,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheet) {
-            return Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(AppStrings.sharedDetails, style: _text(size: 18, weight: FontWeight.w700)),
-                    const SizedBox(height: 8),
-                    _classDropdowns(
-                      category: category,
-                      name: name,
-                      design: design,
-                      onChanged: (key, value) => setSheet(() {
-                        if (key == 'category') category = value;
-                        if (key == 'name') name = value;
-                        if (key == 'design') design = value;
-                      }),
-                    ),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _masterSheet();
-                      },
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text(AppStrings.addClassification),
-                    ),
-                    if (error != null) _errorText(error!),
-                    FilledButton(
-                      onPressed: () {
-                        if (category.isEmpty || name.isEmpty || design.isEmpty) {
-                          setSheet(() => error = AppStrings.chooseShared);
-                          return;
-                        }
-                        _session.bulkCategory = category;
-                        _session.bulkName = name;
-                        _session.bulkDesign = design;
-                        _session.dirty = true;
-                        Navigator.pop(context);
-                        setState(() {});
-                      },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _ink,
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      child: const Text(AppStrings.applyToBatch),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
   void _masterSheet() {
     var kind = 'Category';
     final value = TextEditingController();
@@ -2027,7 +2280,10 @@ class _ProductsPageState extends State<ProductsPage> {
         return StatefulBuilder(
           builder: (context, setSheet) {
             return Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 20 + MediaQuery.viewInsetsOf(context).bottom),
+              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+              child: SingleChildScrollView(
+              child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2035,6 +2291,7 @@ class _ProductsPageState extends State<ProductsPage> {
                   Text(AppStrings.addClassification, style: _text(size: 18, weight: FontWeight.w700)),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
+                    key: ValueKey(kind),
                     initialValue: kind,
                     decoration: _input.copyWith(labelText: AppStrings.fieldLabel),
                     items: [
@@ -2067,7 +2324,11 @@ class _ProductsPageState extends State<ProductsPage> {
                       if (!options.contains(entered)) options.add(entered);
                       _session.dirty = true;
                       Navigator.pop(context);
-                      setState(() {});
+                      setState(() {
+                        if (key == 'category') _session.bulkCategory = entered;
+                        if (key == 'name') _session.bulkName = entered;
+                        if (key == 'design') _session.bulkDesign = entered;
+                      });
                       _toast(AppStrings.optionAdded);
                     },
                     style: FilledButton.styleFrom(backgroundColor: _ink),
@@ -2078,37 +2339,13 @@ class _ProductsPageState extends State<ProductsPage> {
                   Text(AppStrings.masterDemoHint, style: _text(size: 12, color: AppColors.muted)),
                 ],
               ),
+            ),
+            ),
             );
           },
         );
       },
     ).whenComplete(value.dispose);
-  }
-
-  void _importSheet() {
-    if (_session.dirty) {
-      _toast(AppStrings.saveOrDiscardImport);
-      return;
-    }
-    _sheet(AppStrings.importExcel, [
-      Text(AppStrings.importExcelBody, style: _text(size: 14, color: AppColors.muted)),
-      const SizedBox(height: 8),
-      Text(AppStrings.noFileSelected, style: _text(size: 13)),
-      const SizedBox(height: 8),
-      FilledButton(
-        onPressed: () {
-          Navigator.pop(context);
-          _loadSample();
-        },
-        style: FilledButton.styleFrom(
-          backgroundColor: _ink,
-          minimumSize: const Size.fromHeight(48),
-        ),
-        child: const Text(AppStrings.exploreSampleImport),
-      ),
-      const SizedBox(height: 8),
-      Text(AppStrings.importNotConnected, style: _text(size: 12, color: AppColors.muted, height: 1.35)),
-    ]);
   }
 
   Future<void> _exportSheet() async {
@@ -2210,17 +2447,22 @@ class _ProductsPageState extends State<ProductsPage> {
     bool enabled,
     ValueChanged<String> onChanged,
   ) {
-    final selected = options.contains(current) ? current : null;
+    final unique = <String>[];
+    for (final option in options) {
+      if (option.trim().isNotEmpty && !unique.contains(option)) unique.add(option);
+    }
+    final selected = unique.contains(current) ? current : null;
     return DropdownButtonFormField<String>(
-      key: ValueKey('$label-$selected-$enabled-${options.length}'),
+      key: ValueKey('$label-$selected-$enabled-${unique.length}'),
       initialValue: selected,
+      menuMaxHeight: 280,
       decoration: _input.copyWith(
         labelText: label,
         fillColor: enabled ? AppColors.white : const Color(0xFFEEEAE2),
       ),
       hint: Text('${AppStrings.chooseOption} ${label.toLowerCase()}'),
       items: [
-        for (final option in options)
+        for (final option in unique)
           DropdownMenuItem(value: option, child: Text(option)),
       ],
       onChanged: enabled ? (value) => onChanged(value ?? '') : null,
@@ -2576,7 +2818,7 @@ class _ProductsPageState extends State<ProductsPage> {
 }
 
 class _RowEditors {
-  _RowEditors(this.piece, this.session) {
+  _RowEditors(this.piece, this.session, {this.onEdit}) {
     id.text = piece.id;
     rfid.text = piece.rfid;
     id.addListener(_sync);
@@ -2585,6 +2827,7 @@ class _RowEditors {
 
   final BulkPiece piece;
   final ProductDemoSession session;
+  final VoidCallback? onEdit;
   final id = TextEditingController();
   final rfid = TextEditingController();
 
@@ -2595,6 +2838,7 @@ class _RowEditors {
     piece.id = id.text.trim();
     piece.rfid = rfid.text.trim();
     session.dirty = true;
+    onEdit?.call();
   }
 
   void dispose() {

@@ -154,13 +154,7 @@ class QuotationRepositoryImpl implements QuotationRepository {
     List<List<String>> tags = const [],
   }) async {
     if (clientCode.isEmpty || codes.isEmpty) return const [];
-    if (stock.clientCode != clientCode || stock.rows.isEmpty) {
-      unawaited(stock.warm(clientCode, () {}));
-      final deadline = DateTime.now().add(const Duration(seconds: 8));
-      while (stock.clientCode == clientCode && stock.rows.isEmpty && DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-      }
-    }
+    await stock.warm(clientCode, () {});
     final found = <String, StockItem>{
       if (stock.clientCode == clientCode)
         for (final item in stock.findTags(codes)) item.identity: item,

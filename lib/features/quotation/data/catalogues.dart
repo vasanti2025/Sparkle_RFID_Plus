@@ -1,4 +1,10 @@
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../../../../core/constants/app_constants.dart';
+import '../../products/data/datasources/product_local_data_source.dart';
 import '../domain/entities/quotation_summary.dart';
 import '../domain/entities/stock_item.dart';
 import 'datasources/quotation_remote_data_source.dart';
@@ -19,6 +25,7 @@ class LabeledStockIndex {
   Map<String, StockItem> _tagMap = const {};
 
   bool readyFor(String code) => clientCode == code && rows.isNotEmpty;
+  var _showingBulk = false;
 
   void _replaceRows(List<StockItem> next) {
     rows = next;
@@ -80,18 +87,92 @@ class LabeledStockIndex {
   }
 
   Future<void> warm(String code, void Function() onRows) {
-    if (clientCode == code && rows.isNotEmpty && _job == null) {
-      Future<void>.microtask(onRows);
-      return Future<void>.value();
+    final pending = _warm(code, onRows);
+    return pending;
+  }
+
+  Future<void> _warm(String code, void Function() onRows) async {
+    final bulk = await _bulkCatalogue();
+    if (bulk == _showingBulk && clientCode == code && rows.isNotEmpty && _job == null) {
+      onRows();
+      return;
     }
-    if (clientCode == code && _job != null) return _job!;
+    if (clientCode == code && _job != null && bulk == _showingBulk) {
+      await _job;
+      return;
+    }
     clientCode = code;
+    _showingBulk = bulk;
     _replaceRows(const []);
-    final job = _fill(code, onRows);
+    final job = bulk ? _fillBulk(onRows) : _fill(code, onRows);
     _job = job;
     return job.whenComplete(() {
       if (identical(_job, job)) _job = null;
     });
+  }
+
+  Future<bool> _bulkCatalogue() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(productCatalogueSourceKey) == productCatalogueBulk;
+  }
+
+  Future<void> _fillBulk(void Function() onRows) async {
+    final database = await openDatabase('${await getDatabasesPath()}/sparkle_products.db');
+    final loaded = <StockItem>[];
+    var offset = 0;
+    const page = 500;
+    while (loaded.length < 20000) {
+      final rows = await database.query(
+        'synced_records',
+        columns: ['payload'],
+        where: 'kind = ?',
+        whereArgs: ['product'],
+        orderBy: 'id',
+        limit: page,
+        offset: offset,
+      );
+      if (rows.isEmpty) break;
+      for (final row in rows) {
+        final decoded = jsonDecode(row['payload'] as String? ?? '{}');
+        if (decoded is! Map) continue;
+        final item = _stockFromStored(Map<String, dynamic>.from(decoded));
+        if (item != null) loaded.add(item);
+      }
+      offset += rows.length;
+      if (rows.length < page) break;
+    }
+    _replaceRows(loaded);
+    onRows();
+  }
+
+  StockItem? _stockFromStored(Map<String, dynamic> payload) {
+    String text(List<String> keys) {
+      for (final key in keys) {
+        final value = payload[key]?.toString().trim() ?? '';
+        if (value.isNotEmpty && value.toLowerCase() != 'null') return value;
+      }
+      return '';
+    }
+
+    final itemCode = text(const ['ItemCode', 'itemCode']);
+    final name = text(const ['ProductName', 'productName']);
+    final rfid = text(const ['RFIDCode', 'RfidCode', 'RFID']);
+    final epc = text(const ['EPC', 'Epc']);
+    if (itemCode.isEmpty && rfid.isEmpty && epc.isEmpty) return null;
+    return StockItem(
+      itemCode: itemCode.isEmpty ? rfid : itemCode,
+      name: name.isEmpty ? itemCode : name,
+      rfid: rfid,
+      gross: text(const ['GrossWeight']),
+      net: text(const ['NetWeight']),
+      design: text(const ['DesignName']),
+      extras: {
+        'epc': epc,
+        'tidnumber': text(const ['TIDNumber', 'TidNumber']),
+        'rfidcode': rfid,
+        'categoryname': text(const ['CategoryName']),
+      },
+    );
   }
 
   Future<void> _fill(String code, void Function() onRows) async {
@@ -324,6 +405,11 @@ class QuotationListIndex {
       number: row.number,
       customerName: remembered,
       amount: row.amount,
+      branch: row.branch,
+      date: row.date,
+      pieces: row.pieces,
+      gross: row.gross,
+      net: row.net,
     );
   }
 

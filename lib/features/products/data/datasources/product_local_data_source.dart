@@ -33,11 +33,17 @@ abstract class ProductLocalDataSource {
   Future<Map<String, String>> rfidMap();
 
   /// Removes every previously synced product, then stores only [items].
-  Future<int> upsertProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress});
+  Future<int> upsertProducts(
+    List<Map<String, dynamic>> items, {
+    String source = productCatalogueSheet,
+    void Function(int written)? onProgress,
+  });
 }
 
 const productCatalogueSourceKey = 'product_catalogue_source';
 const productCatalogueSheet = 'sheet';
+const productCatalogueBulk = 'bulk';
+const productCatalogueServer = 'server';
 
 class ProductLocalDataSourceImpl implements ProductLocalDataSource {
   ProductLocalDataSourceImpl();
@@ -96,6 +102,7 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
           start: 0.9,
           end: 1,
         );
+        await prefs.setString(productCatalogueSourceKey, productCatalogueServer);
       }
       await productFile.delete();
       if (!controller.isClosed) {
@@ -338,7 +345,11 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
   }
 
   @override
-  Future<int> upsertProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress}) async {
+  Future<int> upsertProducts(
+    List<Map<String, dynamic>> items, {
+    String source = productCatalogueSheet,
+    void Function(int written)? onProgress,
+  }) async {
     final database = await _open();
     await database.delete(
       'synced_records',
@@ -346,7 +357,7 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
       whereArgs: [StoredRecord.kindProduct],
     );
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(productCatalogueSourceKey, productCatalogueSheet);
+    await prefs.setString(productCatalogueSourceKey, source);
     if (items.isEmpty) return 0;
     var written = 0;
     const page = 200;

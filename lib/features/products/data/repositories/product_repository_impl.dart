@@ -85,4 +85,9 @@ class ProductRepositoryImpl implements ProductRepository {
   Future<int> importProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress}) {
     return localDataSource.upsertProducts(items, onProgress: onProgress);
   }
+
+  @override
+  Future<int> saveBulkProducts(List<Map<String, dynamic>> items) {
+    return localDataSource.upsertProducts(items, source: productCatalogueBulk);
+  }
 }

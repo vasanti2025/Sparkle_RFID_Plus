@@ -25,4 +25,6 @@ abstract class ProductRepository {
   Future<Map<String, String>> storedRfidMap();
 
   Future<int> importProducts(List<Map<String, dynamic>> items, {void Function(int written)? onProgress});
+
+  Future<int> saveBulkProducts(List<Map<String, dynamic>> items);
 }
