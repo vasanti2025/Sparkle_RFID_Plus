@@ -498,6 +498,10 @@ abstract final class AppStrings {
   static const sharedDetails = 'Shared details';
   static const applyToBatch = 'Apply to this batch';
   static const addClassification = 'Add a classification option';
+  static const addNewCategory = 'Add new category';
+  static const addNewProduct = 'Add new product';
+  static const addNewDesign = 'Add new design';
+  static const addNewPurity = 'Add new purity';
   static const fieldLabel = 'Field';
   static const newValue = 'New value';
   static const addOption = 'Add option';

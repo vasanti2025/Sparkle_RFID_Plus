@@ -24,11 +24,12 @@ class ProductDraft {
 }
 
 class BulkPiece {
-  BulkPiece({this.id = '', this.rfid = '', this.epc = ''});
+  BulkPiece({this.id = '', this.rfid = '', this.epc = '', this.tid = ''});
 
   String id;
   String rfid;
   String epc;
+  String tid;
 }
 
 class CataloguePiece {
@@ -152,6 +153,7 @@ class ProductDemoSession {
     ProductDraft input, {
     List<CataloguePiece> extra = const [],
     bool catalogue = true,
+    bool sharedCodes = false,
   }) {
     final id = input.id.trim().toUpperCase();
     final epc = input.epc.trim().toUpperCase();
@@ -162,13 +164,14 @@ class ProductDemoSession {
     if (input.name.trim().isEmpty) errors.add(AppStrings.chooseAProduct);
     if (input.design.trim().isEmpty) errors.add(AppStrings.chooseADesign);
     final pool = [...(catalogue ? items : const <CataloguePiece>[]), ...extra];
-    if (id.isNotEmpty && pool.any((item) => item.id.toUpperCase() == id)) {
+    if (!sharedCodes && id.isNotEmpty && pool.any((item) => item.id.toUpperCase() == id)) {
       errors.add(AppStrings.itemCodeUsed);
     }
     if (epc.isNotEmpty && pool.any((item) => item.epc.toUpperCase() == epc)) {
       errors.add(AppStrings.epcUsed);
     }
-    if (rfid.isNotEmpty &&
+    if (!sharedCodes &&
+        rfid.isNotEmpty &&
         pool.any((item) => item.rfid.toUpperCase() == rfid)) {
       errors.add(AppStrings.rfidUsed);
     }
@@ -220,7 +223,7 @@ class ProductDemoSession {
         ..id = row.id
         ..rfid = row.rfid
         ..epc = row.epc;
-      for (final error in validateSingle(draft, extra: seen, catalogue: false)) {
+      for (final error in validateSingle(draft, extra: seen, catalogue: false, sharedCodes: true)) {
         errors.add('${AppStrings.rowLabel} ${i + 1}: $error');
       }
       seen.add(_pieceFrom(draft));

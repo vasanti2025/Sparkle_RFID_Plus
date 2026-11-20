@@ -221,7 +221,7 @@ class ProductLocalDataSourceImpl implements ProductLocalDataSource {
         : (
             itemCode: _text(item, const ['ItemCode', 'itemCode']),
             rfid: _text(item, const ['RFIDCode', 'Rfid', 'rfid', 'TIDNumber']),
-            barcode: _text(item, const ['BarcodeNumber', 'Barcode', 'barcode']),
+            barcode: _text(item, const ['BarcodeNumber', 'Barcode', 'barcode', 'EPC', 'Epc']),
             name: _text(item, const [
               'ProductName',
               'productName',

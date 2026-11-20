@@ -95,7 +95,9 @@ class _ProductsPageState extends State<ProductsPage> {
   var _copyRfid = false;
   var _radioOn = false;
   var _barcodeOn = false;
+  var _power = 5;
   int? _scanRow;
+  int? _scanCreatedRow;
   int? _selectedRow;
   int? _rfidFocus;
   StreamSubscription<RfidBarcodeInfo>? _barcodeSub;
@@ -141,6 +143,7 @@ class _ProductsPageState extends State<ProductsPage> {
       if (_page == _ProductPage.list) setState(() {});
     });
     unawaited(_reloadStored());
+    unawaited(_loadBulkPower());
     Injection.settings.addListener(_onLanguage);
     for (final key in _singleKeys) {
       final controller = TextEditingController();
@@ -425,6 +428,7 @@ class _ProductsPageState extends State<ProductsPage> {
     final radio = _radioOn;
     _radioOn = false;
     _scanRow = null;
+    _scanCreatedRow = null;
     if (radio) await RfidService.instance.stopInventory();
     if (mounted && ticket == _readTicket) setState(() => _readingTag = false);
   }
@@ -451,10 +455,12 @@ class _ProductsPageState extends State<ProductsPage> {
       setState(() {
         _addPiece(BulkPiece());
         if (_copyItem) _copyFromFirst();
+        _scanCreatedRow = _rows.length - 1;
       });
       await _scanOneRow(_rows.length - 1);
       return;
     }
+    _scanCreatedRow = null;
     await _scanOneRow(selected);
   }
 
@@ -536,6 +542,7 @@ class _ProductsPageState extends State<ProductsPage> {
     }
     await _stopBarcode();
     await service.stopIfRunning();
+    await service.setPower(_power);
     await service.setInventoryMode(1);
     final reading = _readSub;
     _readSub = null;
@@ -550,16 +557,25 @@ class _ProductsPageState extends State<ProductsPage> {
         final code = (usable ? epc : tid).trim().toUpperCase();
         if (code.isEmpty) continue;
         final storedEpc = usable ? epc.toUpperCase() : code;
+        final storedTid = tid.trim().toUpperCase();
         if (!multi) {
           final index = _scanRow;
           if (index == null || index >= _rows.length) continue;
-          _rows[index].piece.epc = storedEpc;
+          if (_epcTaken(storedEpc, except: index)) {
+            _dropEmptyScanRow();
+            unawaited(_finishRead(ticket));
+            changed = true;
+            break;
+          }
+          _rememberTag(index, storedEpc, storedTid);
+          _scanCreatedRow = null;
           if (_copyItem) _copyFromFirst();
           unawaited(_finishRead(ticket));
           changed = true;
           break;
         }
-        if (_addPiece(BulkPiece(epc: storedEpc))) {
+        if (_epcTaken(storedEpc)) continue;
+        if (_addPiece(BulkPiece(epc: storedEpc, tid: storedTid))) {
           if (_copyItem) _copyFromFirst();
           changed = true;
         }
@@ -583,6 +599,55 @@ class _ProductsPageState extends State<ProductsPage> {
     return true;
   }
 
+  static const _powerKey = 'bulk_scan_power';
+
+  Future<void> _loadBulkPower() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getInt(_powerKey) ?? 5;
+    if (!mounted) return;
+    setState(() => _power = value < 1 ? 1 : (value > 30 ? 30 : value));
+  }
+
+  Future<void> _setBulkPower(int value) async {
+    final power = value < 1 ? 1 : (value > 30 ? 30 : value);
+    setState(() => _power = power);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_powerKey, power);
+    final error = await RfidService.instance.setPower(power);
+    if (!mounted || error == null) return;
+    _toast(error);
+  }
+
+  Widget _powerButton() {
+    return PopupMenuButton<int>(
+      tooltip: 'Power',
+      initialValue: _power,
+      padding: EdgeInsets.zero,
+      offset: const Offset(0, 40),
+      constraints: const BoxConstraints(minWidth: 72, maxHeight: 280),
+      onSelected: (value) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_setBulkPower(value));
+        });
+      },
+      itemBuilder: (context) => [
+        for (var value = 1; value <= 30; value++)
+          PopupMenuItem<int>(
+            value: value,
+            height: 40,
+            child: Text('$value', style: _text(size: 14, weight: value == _power ? FontWeight.w700 : FontWeight.w500)),
+          ),
+      ],
+      child: Container(
+        width: 36,
+        height: 36,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(color: _ink, borderRadius: BorderRadius.circular(8)),
+        child: Text('$_power', style: _text(size: 14, weight: FontWeight.w700, color: AppColors.white)),
+      ),
+    );
+  }
+
   void _copyFromFirst() {
     if (_rows.isEmpty) return;
     final first = _rows.first;
@@ -600,11 +665,67 @@ class _ProductsPageState extends State<ProductsPage> {
     }
   }
 
-  bool _addPiece(BulkPiece piece) {
-    if (piece.epc.isNotEmpty &&
-        _session.bulkRows.any((row) => row.epc == piece.epc)) {
-      return false;
+  bool _epcTaken(String epc, {int except = -1}) {
+    final key = epc.trim().toUpperCase();
+    if (key.isEmpty) return false;
+    for (var i = 0; i < _rows.length; i++) {
+      if (i == except) continue;
+      if (_rows[i].piece.epc.trim().toUpperCase() == key) return true;
     }
+    for (var i = 0; i < _session.bulkRows.length; i++) {
+      if (i == except) continue;
+      if (_session.bulkRows[i].epc.trim().toUpperCase() == key) return true;
+    }
+    return false;
+  }
+
+  void _dropEmptyScanRow() {
+    final index = _scanCreatedRow;
+    _scanCreatedRow = null;
+    if (index == null || index < 0 || index >= _rows.length || index >= _session.bulkRows.length) return;
+    final editor = _rows[index];
+    if (editor.piece.epc.trim().isNotEmpty) return;
+    if (editor.id.text.trim().isNotEmpty || editor.rfid.text.trim().isNotEmpty) return;
+    editor.dispose();
+    _rows.removeAt(index);
+    _session.bulkRows.removeAt(index);
+    if (_selectedRow != null && (_selectedRow! >= _rows.length || _selectedRow == index)) {
+      _selectedRow = _rows.isEmpty ? null : _rows.length - 1;
+    }
+  }
+
+  void _rememberTag(int index, String epc, String tid) {
+    if (index < 0 || index >= _rows.length) return;
+    final piece = _rows[index].piece;
+    piece.epc = epc;
+    if (tid.isNotEmpty) piece.tid = tid;
+    if (index < _session.bulkRows.length) {
+      final stored = _session.bulkRows[index];
+      stored.epc = epc;
+      if (tid.isNotEmpty) stored.tid = tid;
+    }
+  }
+
+  void _commitBulkRows() {
+    final count = _rows.length < _session.bulkRows.length ? _rows.length : _session.bulkRows.length;
+    for (var i = 0; i < count; i++) {
+      final editor = _rows[i];
+      final piece = _session.bulkRows[i];
+      piece.id = editor.id.text.trim();
+      piece.rfid = editor.rfid.text.trim();
+      final scanned = editor.piece.epc.trim();
+      if (scanned.isNotEmpty) piece.epc = scanned;
+      final tid = editor.piece.tid.trim();
+      if (tid.isNotEmpty) piece.tid = tid;
+      if (!identical(editor.piece, piece)) {
+        editor.piece.epc = piece.epc;
+        editor.piece.tid = piece.tid;
+      }
+    }
+  }
+
+  bool _addPiece(BulkPiece piece) {
+    if (_epcTaken(piece.epc)) return false;
     _session.bulkRows.add(piece);
     _rows.add(_RowEditors(piece, _session, onEdit: () {
       if (_rows.isNotEmpty && identical(piece, _rows.first.piece)) _copyFromFirst();
@@ -624,6 +745,7 @@ class _ProductsPageState extends State<ProductsPage> {
   }
 
   void _reviewBulk() {
+    _commitBulkRows();
     final errors = _session.validateBulk();
     if (errors.isNotEmpty) {
       setState(() => _error = errors.join('\n'));
@@ -795,6 +917,7 @@ class _ProductsPageState extends State<ProductsPage> {
 
   Future<void> _saveBulk() async {
     if (_saving) return;
+    _commitBulkRows();
     final errors = _session.validateBulk();
     if (errors.isNotEmpty) {
       setState(() => _error = errors.join('\n'));
@@ -804,18 +927,30 @@ class _ProductsPageState extends State<ProductsPage> {
       _saving = true;
       _error = null;
     });
-    final items = [
-      for (final row in _session.bulkRows)
-        <String, dynamic>{
-          'ItemCode': row.id.trim(),
-          'RFIDCode': row.rfid.trim(),
-          'EPC': row.epc.trim(),
-          'TIDNumber': row.epc.trim(),
-          'CategoryName': _session.bulkCategory.trim(),
-          'ProductName': _session.bulkName.trim(),
-          'DesignName': _session.bulkDesign.trim(),
-        },
-    ];
+    final items = <Map<String, dynamic>>[];
+    for (var i = 0; i < _session.bulkRows.length; i++) {
+      final row = _session.bulkRows[i];
+      final live = i < _rows.length ? _rows[i].piece : row;
+      final epc = live.epc.trim().isNotEmpty ? live.epc.trim() : row.epc.trim();
+      final tid = live.tid.trim().isNotEmpty
+          ? live.tid.trim()
+          : (row.tid.trim().isNotEmpty ? row.tid.trim() : epc);
+      row.epc = epc;
+      row.tid = tid;
+      items.add({
+        'ItemCode': row.id.trim(),
+        'RFIDCode': row.rfid.trim(),
+        'EPC': epc,
+        'Epc': epc,
+        'epc': epc,
+        'TIDNumber': tid,
+        'TidNumber': tid,
+        'TidValue': tid,
+        'CategoryName': _session.bulkCategory.trim(),
+        'ProductName': _session.bulkName.trim(),
+        'DesignName': _session.bulkDesign.trim(),
+      });
+    }
     try {
       await Injection.productRepository.saveBulkProducts(items);
       await InventoryStock.instance.load();
@@ -1061,6 +1196,10 @@ class _ProductsPageState extends State<ProductsPage> {
                 ],
               ),
             ),
+            if (_page == _ProductPage.bulk) ...[
+              _powerButton(),
+              const SizedBox(width: 4),
+            ],
             IconButton(
               tooltip: AppStrings.moreActions,
               onPressed: _page == _ProductPage.single || _page == _ProductPage.bulk
@@ -1148,7 +1287,7 @@ class _ProductsPageState extends State<ProductsPage> {
     return CataloguePiece(
       id: text(const ['ItemCode', 'itemCode']) ?? record.itemCode ?? '',
       name: text(const ['ProductName', 'productName', 'ItemName']) ?? record.name ?? '',
-      epc: text(const ['EPC', 'Epc']) ?? '',
+      epc: text(const ['EPC', 'Epc', 'epc']) ?? '',
       rfid: text(const ['RFIDCode', 'RfidCode', 'RFID']) ?? '',
       category: text(const ['CategoryName']) ?? '',
       design: text(const ['DesignName']) ?? '',
@@ -1378,6 +1517,13 @@ class _ProductsPageState extends State<ProductsPage> {
                     '${item.id} · ${AppStrings.grossShort} $gross',
                     style: _text(size: 12, color: AppColors.muted),
                   ),
+                  if (item.epc.isNotEmpty)
+                    Text(
+                      item.epc,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _text(size: 11, color: AppColors.muted),
+                    ),
                   const SizedBox(height: 2),
                   Text(
                     sheet
@@ -1566,49 +1712,19 @@ class _ProductsPageState extends State<ProductsPage> {
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right, color: _chevron),
+                Icon(_sharedOpen ? Icons.expand_less : Icons.expand_more, color: _chevron),
               ],
             ),
           ),
         ),
         _bulkHeader(),
-        Expanded(
-          child: _rows.isEmpty
-              ? _empty(AppStrings.readyForBatch, AppStrings.scanOrAddRows)
-              : ListView.builder(
-                  itemCount: _rows.length,
-                  itemBuilder: (context, index) => _bulkRow(index),
-                ),
-        ),
-        if (_error != null) Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 8), child: _errorText(_error!)),
-        if (_sharedOpen)
-          Material(
-            color: AppColors.white,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-              child: Column(
-                children: [
-                  _classDropdowns(
-                    category: _session.bulkCategory,
-                    name: _session.bulkName,
-                    design: _session.bulkDesign,
-                    onChanged: (key, value) => setState(() {
-                      _session.dirty = true;
-                      if (key == 'category') _session.bulkCategory = value;
-                      if (key == 'name') _session.bulkName = value;
-                      if (key == 'design') _session.bulkDesign = value;
-                    }),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: _masterSheet,
-                      icon: const Icon(Icons.add, size: 18),
-                      label: const Text(AppStrings.addClassification),
-                    ),
-                  ),
-                ],
-              ),
+        Expanded(child: _bulkBody()),
+        if (_error != null)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 96),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: _errorText(_error!),
             ),
           ),
         if (_saving) const LinearProgressIndicator(color: _ink, minHeight: 2),
@@ -1637,6 +1753,67 @@ class _ProductsPageState extends State<ProductsPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _bulkBody() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final share = constraints.maxHeight * 0.5;
+        final panelMax = !_sharedOpen ? 0.0 : (share > 248 ? 248.0 : share);
+        return Column(
+          children: [
+            Expanded(
+              child: _rows.isEmpty
+                  ? _empty(AppStrings.readyForBatch, AppStrings.scanOrAddRows)
+                  : ListView.builder(
+                      itemCount: _rows.length,
+                      itemBuilder: (context, index) => _bulkRow(index),
+                    ),
+            ),
+            if (_sharedOpen && panelMax > 0)
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: panelMax),
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF8F2E6),
+                    border: Border(top: BorderSide(color: _classLine)),
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Text(AppStrings.sharedDetails, style: _text(size: 13, weight: FontWeight.w700)),
+                            const Spacer(),
+                            InkWell(
+                              onTap: () => setState(() => _sharedOpen = false),
+                              child: Text(AppStrings.done, style: _text(size: 12, weight: FontWeight.w700, color: _gold)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _classDropdowns(
+                          category: _session.bulkCategory,
+                          name: _session.bulkName,
+                          design: _session.bulkDesign,
+                          onChanged: (key, value) => setState(() {
+                            _session.dirty = true;
+                            if (key == 'category') _session.bulkCategory = value;
+                            if (key == 'name') _session.bulkName = value;
+                            if (key == 'design') _session.bulkDesign = value;
+                          }),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
@@ -2185,9 +2362,11 @@ class _ProductsPageState extends State<ProductsPage> {
 
   void _reviewSheet({required bool bulk}) {
     final rows = bulk
-        ? _session.bulkRows
-            .map((row) => '${row.id} · ${row.rfid.isEmpty ? AppStrings.noRfidCode : row.rfid}')
-            .toList()
+        ? _session.bulkRows.map((row) {
+            final rfid = row.rfid.isEmpty ? AppStrings.noRfidCode : row.rfid;
+            final epc = row.epc.trim();
+            return epc.isEmpty ? '${row.id} · $rfid' : '${row.id} · $rfid · $epc';
+          }).toList()
         : [
             '${_draft.id} · ${_draft.rfid.isEmpty ? AppStrings.noRfidCode : _draft.rfid}',
           ];
@@ -2269,83 +2448,30 @@ class _ProductsPageState extends State<ProductsPage> {
   }
 
   void _masterSheet() {
-    var kind = 'Category';
-    final value = TextEditingController();
-    String? error;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _surface,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheet) {
-            return Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-              child: SingleChildScrollView(
-              child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(AppStrings.addClassification, style: _text(size: 18, weight: FontWeight.w700)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(kind),
-                    initialValue: kind,
-                    decoration: _input.copyWith(labelText: AppStrings.fieldLabel),
-                    items: [
-                      for (final option in ['Category', 'Product', 'Design', 'Purity'])
-                        DropdownMenuItem(value: option, child: Text(option)),
-                    ],
-                    onChanged: (next) => setSheet(() => kind = next ?? kind),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: value,
-                    decoration: _input.copyWith(labelText: AppStrings.newValue),
-                  ),
-                  if (error != null) _errorText(error!),
-                  const SizedBox(height: 8),
-                  FilledButton.icon(
-                    onPressed: () {
-                      final entered = value.text.trim();
-                      if (entered.isEmpty) {
-                        setSheet(() => error = AppStrings.chooseClass);
-                        return;
-                      }
-                      final key = switch (kind) {
-                        'Product' => 'name',
-                        'Design' => 'design',
-                        'Purity' => 'purity',
-                        _ => 'category',
-                      };
-                      final options = _session.masters[key]!;
-                      if (!options.contains(entered)) options.add(entered);
-                      _session.dirty = true;
-                      Navigator.pop(context);
-                      setState(() {
-                        if (key == 'category') _session.bulkCategory = entered;
-                        if (key == 'name') _session.bulkName = entered;
-                        if (key == 'design') _session.bulkDesign = entered;
-                      });
-                      _toast(AppStrings.optionAdded);
-                    },
-                    style: FilledButton.styleFrom(backgroundColor: _ink),
-                    icon: const Icon(Icons.add),
-                    label: const Text(AppStrings.addOption),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(AppStrings.masterDemoHint, style: _text(size: 12, color: AppColors.muted)),
-                ],
-              ),
-            ),
-            ),
-            );
-          },
-        );
-      },
-    ).whenComplete(value.dispose);
+    unawaited(() async {
+      final entered = await showDialog<({String kind, String name})>(
+        context: context,
+        useRootNavigator: true,
+        builder: (context) => const _ClassDialog(kinds: ['Category', 'Product', 'Design']),
+      );
+      if (!mounted || entered == null || entered.name.trim().isEmpty) return;
+      final name = entered.name.trim();
+      final key = switch (entered.kind) {
+        'Product' => 'name',
+        'Design' => 'design',
+        _ => 'category',
+      };
+      final options = _session.masters[key];
+      if (options == null) return;
+      if (!options.contains(name)) options.add(name);
+      _session.dirty = true;
+      setState(() {
+        if (key == 'category') _session.bulkCategory = name;
+        if (key == 'name') _session.bulkName = name;
+        if (key == 'design') _session.bulkDesign = name;
+      });
+      _toast(AppStrings.optionAdded);
+    }());
   }
 
   Future<void> _exportSheet() async {
@@ -2419,25 +2545,96 @@ class _ProductsPageState extends State<ProductsPage> {
   }) {
     return Column(
       children: [
-        _drop(AppStrings.category, category, _session.masters['category']!, true, (value) {
-          onChanged('category', value);
-        }),
+        _drop(
+          AppStrings.category,
+          category,
+          _session.masters['category']!,
+          true,
+          (value) => onChanged('category', value),
+          addLabel: AppStrings.addNewCategory,
+          onAdd: () => _addMasterValue(
+            'category',
+            (value) => onChanged('category', value),
+            title: AppStrings.addNewCategory,
+            field: AppStrings.category,
+          ),
+        ),
         const SizedBox(height: 8),
-        _drop(AppStrings.product, name, _session.masters['name']!, category.isNotEmpty, (value) {
-          onChanged('name', value);
-        }),
+        _drop(
+          AppStrings.product,
+          name,
+          _session.masters['name']!,
+          category.isNotEmpty,
+          (value) => onChanged('name', value),
+          addLabel: AppStrings.addNewProduct,
+          onAdd: category.isEmpty
+              ? null
+              : () => _addMasterValue(
+                    'name',
+                    (value) => onChanged('name', value),
+                    title: AppStrings.addNewProduct,
+                    field: AppStrings.product,
+                  ),
+        ),
         const SizedBox(height: 8),
-        _drop(AppStrings.design, design, _session.masters['design']!, name.isNotEmpty, (value) {
-          onChanged('design', value);
-        }),
+        _drop(
+          AppStrings.design,
+          design,
+          _session.masters['design']!,
+          name.isNotEmpty,
+          (value) => onChanged('design', value),
+          addLabel: AppStrings.addNewDesign,
+          onAdd: name.isEmpty
+              ? null
+              : () => _addMasterValue(
+                    'design',
+                    (value) => onChanged('design', value),
+                    title: AppStrings.addNewDesign,
+                    field: AppStrings.design,
+                  ),
+        ),
         if (showPurity) ...[
           const SizedBox(height: 8),
-          _drop(AppStrings.purity, purity, _session.masters['purity']!, design.isNotEmpty, (value) {
-            onChanged('purity', value);
-          }),
+          _drop(
+            AppStrings.purity,
+            purity,
+            _session.masters['purity']!,
+            design.isNotEmpty,
+            (value) => onChanged('purity', value),
+            addLabel: AppStrings.addNewPurity,
+            onAdd: design.isEmpty
+                ? null
+                : () => _addMasterValue(
+                      'purity',
+                      (value) => onChanged('purity', value),
+                      title: AppStrings.addNewPurity,
+                      field: AppStrings.purity,
+                    ),
+          ),
         ],
       ],
     );
+  }
+
+  Future<void> _addMasterValue(
+    String key,
+    ValueChanged<String> onSelected, {
+    required String title,
+    required String field,
+  }) async {
+    final entered = await showDialog<({String kind, String name})>(
+      context: context,
+      useRootNavigator: true,
+      builder: (context) => _ClassDialog(title: title, fieldLabel: field),
+    );
+    if (!mounted || entered == null || entered.name.trim().isEmpty) return;
+    final name = entered.name.trim();
+    final options = _session.masters[key];
+    if (options == null) return;
+    if (!options.contains(name)) options.add(name);
+    _session.dirty = true;
+    onSelected(name);
+    _toast(AppStrings.optionAdded);
   }
 
   Widget _drop(
@@ -2445,27 +2642,64 @@ class _ProductsPageState extends State<ProductsPage> {
     String current,
     List<String> options,
     bool enabled,
-    ValueChanged<String> onChanged,
-  ) {
+    ValueChanged<String> onChanged, {
+    VoidCallback? onAdd,
+    String? addLabel,
+  }) {
     final unique = <String>[];
     for (final option in options) {
       if (option.trim().isNotEmpty && !unique.contains(option)) unique.add(option);
     }
     final selected = unique.contains(current) ? current : null;
-    return DropdownButtonFormField<String>(
-      key: ValueKey('$label-$selected-$enabled-${unique.length}'),
-      initialValue: selected,
-      menuMaxHeight: 280,
+    final field = InputDecorator(
       decoration: _input.copyWith(
         labelText: label,
         fillColor: enabled ? AppColors.white : const Color(0xFFEEEAE2),
+        enabled: enabled,
+        suffixIcon: Icon(Icons.expand_more, color: enabled ? _ink : AppColors.muted),
       ),
-      hint: Text('${AppStrings.chooseOption} ${label.toLowerCase()}'),
-      items: [
+      child: Text(
+        selected ?? '${AppStrings.chooseOption} ${label.toLowerCase()}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: _text(size: 14, color: selected == null ? AppColors.muted : const Color(0xFF20201F)),
+      ),
+    );
+    if (!enabled) return field;
+    return PopupMenuButton<String>(
+      tooltip: label,
+      padding: EdgeInsets.zero,
+      offset: const Offset(0, 4),
+      position: PopupMenuPosition.under,
+      constraints: const BoxConstraints(minWidth: 220, maxHeight: 280),
+      onSelected: (value) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (value == '__ADD_NEW__') {
+            onAdd?.call();
+            return;
+          }
+          if (value != current) onChanged(value);
+        });
+      },
+      itemBuilder: (context) => [
+        if (onAdd != null)
+          PopupMenuItem<String>(
+            value: '__ADD_NEW__',
+            height: 44,
+            child: Text(addLabel ?? AppStrings.addClassification, style: _text(size: 13, weight: FontWeight.w700, color: _gold)),
+          ),
         for (final option in unique)
-          DropdownMenuItem(value: option, child: Text(option)),
+          PopupMenuItem<String>(
+            value: option,
+            height: 44,
+            child: Text(
+              option,
+              style: _text(size: 14, weight: option == selected ? FontWeight.w700 : FontWeight.w500),
+            ),
+          ),
       ],
-      onChanged: enabled ? (value) => onChanged(value ?? '') : null,
+      child: field,
     );
   }
 
@@ -2897,4 +3131,115 @@ TextStyle _text({
     letterSpacing: letterSpacing,
     decoration: TextDecoration.none,
   );
+}
+
+class _ClassDialog extends StatefulWidget {
+  const _ClassDialog({
+    this.kinds = const [],
+    this.title = AppStrings.addNewCategory,
+    this.fieldLabel = AppStrings.category,
+  });
+
+  final List<String> kinds;
+  final String title;
+  final String fieldLabel;
+
+  @override
+  State<_ClassDialog> createState() => _ClassDialogState();
+}
+
+class _ClassDialogState extends State<_ClassDialog> {
+  final _name = TextEditingController();
+  late String _kind = widget.kinds.isEmpty ? '' : widget.kinds.first;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  String _titleFor(String kind) {
+    return switch (kind) {
+      'Product' => AppStrings.addNewProduct,
+      'Design' => AppStrings.addNewDesign,
+      'Purity' => AppStrings.addNewPurity,
+      _ => AppStrings.addNewCategory,
+    };
+  }
+
+  String _fieldFor(String kind) {
+    return switch (kind) {
+      'Product' => AppStrings.product,
+      'Design' => AppStrings.design,
+      'Purity' => AppStrings.purity,
+      _ => AppStrings.category,
+    };
+  }
+
+  void _submit() {
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = widget.kinds.isEmpty ? 'Enter a name.' : AppStrings.chooseClass);
+      return;
+    }
+    Navigator.of(context).pop((kind: _kind, name: name));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = widget.kinds.isEmpty ? widget.title : _titleFor(_kind);
+    final field = widget.kinds.isEmpty ? widget.fieldLabel : _fieldFor(_kind);
+    return AlertDialog(
+      backgroundColor: _ProductsPageState._surface,
+      title: Text(title, style: _text(size: 18, weight: FontWeight.w700)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.kinds.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final option in widget.kinds)
+                    ChoiceChip(
+                      label: Text(option, style: _text(size: 12, weight: FontWeight.w600)),
+                      selected: _kind == option,
+                      selectedColor: const Color(0xFFF8F2E6),
+                      onSelected: (_) => setState(() => _kind = option),
+                    ),
+                ],
+              ),
+            if (widget.kinds.isNotEmpty) const SizedBox(height: 12),
+            TextField(
+              controller: _name,
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+              decoration: _input.copyWith(labelText: field),
+              onSubmitted: (_) => _submit(),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: _text(size: 12, color: const Color(0xFF964A32))),
+            ],
+            const SizedBox(height: 8),
+            Text(AppStrings.masterDemoHint, style: _text(size: 12, color: AppColors.muted)),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(AppStrings.cancel, style: _text(size: 14, weight: FontWeight.w600)),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(backgroundColor: _ProductsPageState._ink),
+          child: Text(title),
+        ),
+      ],
+    );
+  }
 }
