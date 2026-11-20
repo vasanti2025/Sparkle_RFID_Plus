@@ -1,0 +1,364 @@
+{
+  "page": {
+    "PageName": "mob_delivery_chalan",
+    "PageDisplayName": "Delivery Challan",
+    "PagePermission": "Enable",
+    "Create": true,
+    "Edit": true,
+    "Delete": true,
+    "PageControls": [
+      {
+        "Id": 1,
+        "key": "customerName",
+        "label": "Customer Name",
+        "placeholder": "Customer name",
+        "priority": 1,
+        "type": "text",
+        "visibility": "ReadWrite",
+        "place": "top"
+      },
+      {
+        "Id": 2,
+        "key": "rfidItemCode",
+        "label": "RFID / Itemcode",
+        "placeholder": "Enter RFID / Itemcode",
+        "priority": 2,
+        "type": "text",
+        "visibility": "ReadWrite",
+        "place": "top"
+      },
+      {
+        "Id": 3,
+        "key": "challanFields",
+        "label": "Challan Fields",
+        "placeholder": "",
+        "priority": 3,
+        "type": "button",
+        "visibility": "ReadWrite",
+        "place": "button"
+      },
+      {
+        "Id": 4,
+        "key": "gst",
+        "label": "GST 3.00%",
+        "placeholder": "",
+        "priority": 4,
+        "type": "checkbox",
+        "visibility": "ReadWrite",
+        "place": "bottom"
+      },
+      {
+        "Id": 5,
+        "key": "branch",
+        "label": "Branch",
+        "placeholder": "Select Branch",
+        "priority": 5,
+        "type": "dropdown",
+        "visibility": "ReadWrite",
+        "place": "top",
+        "options": ["Pune", "Mumbai", "Surat"]
+      },
+      {
+        "Id": 6,
+        "key": "date",
+        "label": "Date",
+        "placeholder": "Date",
+        "priority": 6,
+        "type": "date",
+        "visibility": "ReadWrite",
+        "place": "top"
+      },
+      {
+        "Id": 7,
+        "key": "finePercent",
+        "label": "Fine %",
+        "placeholder": "Fine %",
+        "priority": 7,
+        "type": "number",
+        "visibility": "ReadWrite",
+        "place": "top"
+      },
+      {
+        "Id": 8,
+        "key": "wastagePercent",
+        "label": "Wastage %",
+        "placeholder": "Wastage %",
+        "priority": 8,
+        "type": "number",
+        "visibility": "ReadWrite",
+        "place": "top"
+      },
+      {
+        "Id": 9,
+        "key": "salesman",
+        "label": "Salesman",
+        "placeholder": "Select salesman",
+        "priority": 9,
+        "type": "dropdown",
+        "visibility": "ReadWrite",
+        "place": "top",
+        "options": ["Amit", "Rahul", "Neha"]
+      },
+      {
+        "Id": 10,
+        "key": "challanNo",
+        "label": "Challan No",
+        "placeholder": "Challan No",
+        "priority": 10,
+        "type": "text",
+        "visibility": "ReadWrite",
+        "place": "top"
+      },
+      {
+        "Id": 11,
+        "key": "itemName",
+        "label": "Item Name",
+        "priority": 11,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 12,
+        "key": "itemCode",
+        "label": "Item Code",
+        "priority": 12,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 13,
+        "key": "grossWt",
+        "label": "Gross Wt",
+        "priority": 13,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 14,
+        "key": "netWt",
+        "label": "Net Wt",
+        "priority": 14,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 15,
+        "key": "qty",
+        "label": "Qty",
+        "priority": 15,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 16,
+        "key": "stoneWt",
+        "label": "Stone Wt",
+        "priority": 16,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 17,
+        "key": "diamondWt",
+        "label": "Diamond Wt",
+        "priority": 17,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 18,
+        "key": "rate",
+        "label": "Rate",
+        "priority": 18,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 19,
+        "key": "makingChg",
+        "label": "Making Chg",
+        "priority": 19,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 20,
+        "key": "stoneAmt",
+        "label": "Stone Amt",
+        "priority": 20,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 21,
+        "key": "diamondAmt",
+        "label": "Diamond Amt",
+        "priority": 21,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 22,
+        "key": "fineWt",
+        "label": "Fine Wt",
+        "priority": 22,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 23,
+        "key": "taxAmt",
+        "label": "Tax Amt",
+        "priority": 23,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 24,
+        "key": "amount",
+        "label": "Amount",
+        "priority": 24,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 25,
+        "key": "totalAmount",
+        "label": "Total Amount",
+        "priority": 25,
+        "type": "label",
+        "visibility": "Read",
+        "place": "bottom"
+      },
+      {
+        "Id": 26,
+        "key": "lineRfid",
+        "label": "RFID",
+        "priority": 26,
+        "type": "label",
+        "visibility": "Read",
+        "place": "middle"
+      },
+      {
+        "Id": 27,
+        "key": "serial",
+        "label": "S.No",
+        "priority": 27,
+        "type": "label",
+        "visibility": "Read",
+        "place": "list"
+      },
+      {
+        "Id": 28,
+        "key": "challanNo",
+        "label": "Challan No",
+        "priority": 28,
+        "type": "label",
+        "visibility": "Read",
+        "place": "list"
+      },
+      {
+        "Id": 29,
+        "key": "challanDate",
+        "label": "Date",
+        "priority": 29,
+        "type": "date",
+        "visibility": "Read",
+        "place": "list"
+      },
+      {
+        "Id": 30,
+        "key": "customerName",
+        "label": "Customer",
+        "priority": 30,
+        "type": "label",
+        "visibility": "Read",
+        "place": "list"
+      },
+      {
+        "Id": 31,
+        "key": "actions",
+        "label": "Actions",
+        "priority": 31,
+        "type": "button",
+        "visibility": "ReadWrite",
+        "place": "list"
+      }
+    ]
+  },
+  "challans": [
+    {
+      "ChallanNo": "1",
+      "ChallanDate": "2026-07-24",
+      "CustomerName": "Vaibhav Vaibhav_jewellers",
+      "branch": "Pune",
+      "date": "20-11-2026",
+      "finePercent": "",
+      "wastagePercent": "",
+      "salesman": "",
+      "challanNo": "1",
+      "items": [
+        {
+          "itemName": "GOLD ORNAME",
+          "itemCode": "DGO133",
+          "qty": "1",
+          "grossWt": "2.100",
+          "netWt": "2.100",
+          "stoneWt": "0.000",
+          "diamondWt": "0.000",
+          "rate": "1000",
+          "makingChg": "63",
+          "stoneAmt": "0",
+          "diamondAmt": "0",
+          "fineWt": "2.100",
+          "taxAmt": "63.00",
+          "amount": "2100",
+          "lineRfid": "E200001",
+          "name": "GOLD ORNAME",
+          "code": "DGO133",
+          "gross": "2.100",
+          "net": "2.100"
+        }
+      ]
+    },
+    {
+      "ChallanNo": "2",
+      "ChallanDate": "2026-08-02",
+      "CustomerName": "Sourabh",
+      "branch": "Mumbai",
+      "date": "02-08-2026",
+      "finePercent": "1",
+      "wastagePercent": "0.5",
+      "salesman": "Amit",
+      "challanNo": "2",
+      "items": [
+        {
+          "itemName": "RING",
+          "itemCode": "RG-14",
+          "qty": "1",
+          "grossWt": "4.250",
+          "netWt": "4.100",
+          "amount": "8200",
+          "name": "RING",
+          "code": "RG-14",
+          "gross": "4.250",
+          "net": "4.100"
+        }
+      ]
+    }
+  ]
+}

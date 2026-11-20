@@ -90,6 +90,7 @@ flutter:
 
   assets:
     - assets/branding/
+    - assets/dummy/delivery_challan.json
 
   fonts:
     - family: Inter
