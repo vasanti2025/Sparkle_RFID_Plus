@@ -7,11 +7,13 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/di/injection.dart';
+import '../../../../core/rfid/scan_permissions.dart';
 import '../../../../core/session/app_session.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../../core/utils/result.dart';
 import '../../../home/presentation/pages/home_page.dart';
+import '../../data/models/user_model.dart';
 import '../../domain/usecases/login.dart';
 
 class LoginPage extends StatefulWidget {
@@ -34,18 +36,18 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _restoreUsername();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ScanPermissions.request());
+    });
   }
 
   Future<void> _restoreUsername() async {
     if (!Injection.ready) return;
     final saved = await Injection.rememberedUsername();
     final password = await Injection.rememberedUsername.password();
-    if (!mounted) return;
-    if ((saved == null || saved.isEmpty) && (password == null || password.isEmpty)) {
-      return;
-    }
+    if (!mounted || saved == null || saved.isEmpty) return;
     setState(() {
-      if (saved != null && saved.isNotEmpty) _usernameController.text = saved;
+      _usernameController.text = saved;
       if (password != null && password.isNotEmpty) {
         _passwordController.text = password;
       }
@@ -102,12 +104,14 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     switch (result) {
       case Success(:final data):
+        final staff = data is UserModel ? data : null;
         AppSession.apply(
           clientCode: data.clientCode,
           userId: data.id,
           token: data.token,
           branchId: data.branchId,
-          branchName: data.branchName,
+          branchNo: staff?.branchNumber,
+          employeeId: staff?.staffId,
         );
         final notice = data.notice;
         if (notice != null && notice.isNotEmpty) {

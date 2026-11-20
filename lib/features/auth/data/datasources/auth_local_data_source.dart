@@ -23,6 +23,26 @@ abstract class AuthLocalDataSource {
   Future<void> clearRememberedPassword();
 
   Future<String?> readRememberedPassword();
+
+  Future<void> saveSessionCredentials({
+    required String username,
+    required String password,
+  });
+
+  Future<({String username, String password})?> readSessionCredentials();
+
+  Future<void> saveRememberedPassword(String password);
+
+  Future<void> clearRememberedPassword();
+
+  Future<String?> readRememberedPassword();
+
+  Future<void> saveSessionCredentials({
+    required String username,
+    required String password,
+  });
+
+  Future<({String username, String password})?> readSessionCredentials();
 }
 
 class AuthLocalDataSourceImpl implements AuthLocalDataSource {
@@ -38,30 +58,51 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
   static const _legacyLoggedInKey = 'auth_logged_in';
   static const _usernameKey = 'remembered_username';
   static const _passwordKey = 'remembered_password';
+  static const _blobKey = 'auth_session_blob';
+  static const _loggedInKey = 'auth_keep_signed_in';
+  static const _sessionUserKey = 'auth_session_username';
+  static const _sessionPassKey = 'auth_session_password';
 
   @override
   Future<void> saveSession(UserModel user) async {
-    await _secure.write(key: _secureUserKey, value: jsonEncode(user.toJson()));
+    final encoded = jsonEncode(user.toJson());
+    await _preferences.setString(_blobKey, encoded);
+    await _preferences.setBool(_loggedInKey, true);
+    try {
+      await _secure.write(key: _secureUserKey, value: encoded);
+    } catch (_) {}
     await _wipeLegacySecrets();
   }
 
   @override
   Future<UserModel?> readSession() async {
-    final stored = await _secure.read(key: _secureUserKey);
-    final user = _decode(stored) ?? await _migrateLegacySession();
+    if (_preferences.getBool(_loggedInKey) == false) return null;
+    String? secureValue;
+    try {
+      secureValue = await _secure.read(key: _secureUserKey);
+    } catch (_) {}
+    final user = _decode(secureValue) ??
+        _decode(_preferences.getString(_blobKey)) ??
+        await _migrateLegacySession();
     if (user == null || user.token.isEmpty || user.username.isEmpty) {
       return null;
     }
-    if (!_tokenUsable(user.token)) {
-      await clearSession();
-      return null;
+    if (_preferences.getBool(_loggedInKey) != true) {
+      await _preferences.setBool(_loggedInKey, true);
+      await _preferences.setString(_blobKey, jsonEncode(user.toJson()));
     }
     return user;
   }
 
   @override
   Future<void> clearSession() async {
-    await _secure.delete(key: _secureUserKey);
+    await _preferences.setBool(_loggedInKey, false);
+    await _preferences.remove(_blobKey);
+    await _preferences.remove(_sessionUserKey);
+    await _preferences.remove(_sessionPassKey);
+    try {
+      await _secure.delete(key: _secureUserKey);
+    } catch (_) {}
     await _wipeLegacySecrets();
   }
 
@@ -73,7 +114,6 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
   @override
   Future<void> clearRememberedUsername() async {
     await _preferences.remove(_usernameKey);
-    await clearRememberedPassword();
   }
 
   @override
@@ -85,19 +125,37 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
 
   @override
   Future<void> saveRememberedPassword(String password) async {
-    await _secure.write(key: _passwordKey, value: password);
+    await _preferences.setString(_passwordKey, password);
   }
 
   @override
   Future<void> clearRememberedPassword() async {
-    await _secure.delete(key: _passwordKey);
+    await _preferences.remove(_passwordKey);
   }
 
   @override
   Future<String?> readRememberedPassword() async {
-    final password = await _secure.read(key: _passwordKey);
+    final password = _preferences.getString(_passwordKey);
     if (password == null || password.isEmpty) return null;
     return password;
+  }
+
+  @override
+  Future<void> saveSessionCredentials({
+    required String username,
+    required String password,
+  }) async {
+    await _preferences.setString(_sessionUserKey, username);
+    await _preferences.setString(_sessionPassKey, password);
+  }
+
+  @override
+  Future<({String username, String password})?> readSessionCredentials() async {
+    if (_preferences.getBool(_loggedInKey) == false) return null;
+    final username = _preferences.getString(_sessionUserKey) ?? '';
+    final password = _preferences.getString(_sessionPassKey) ?? '';
+    if (username.isEmpty || password.isEmpty) return null;
+    return (username: username, password: password);
   }
 
   Future<UserModel?> _migrateLegacySession() async {
@@ -128,26 +186,119 @@ class AuthLocalDataSourceImpl implements AuthLocalDataSource {
     await _preferences.remove(_legacyLoggedInKey);
   }
 
-  bool _tokenUsable(String token) {
-    final parts = token.split('.');
-    if (parts.length != 3) return true;
+}
+
+/// A token stays usable until its expiry is known and already past.
+/// Decode failures do not sign the user out.
+bool authTokenUsable(String token) {
+  final parts = token.split('.');
+  if (parts.length != 3) return true;
+  try {
+    final payload = utf8.decode(
+      base64Url.decode(base64Url.normalize(parts[1])),
+    );
+    final decoded = jsonDecode(payload);
+    if (decoded is! Map) return true;
+    final exp = decoded['exp'];
+    final seconds = exp is num ? exp.toInt() : int.tryParse('$exp');
+    if (seconds == null) return true;
+    final expiry = DateTime.fromMillisecondsSinceEpoch(
+      seconds * 1000,
+      isUtc: true,
+    );
+    return DateTime.now().toUtc().isBefore(
+      expiry.subtract(const Duration(seconds: 30)),
+    );
+  } catch (_) {
+    return true;
+  static const _passwordKey = 'remembered_password';
+  static const _blobKey = 'auth_session_blob';
+  static const _loggedInKey = 'auth_keep_signed_in';
+  static const _sessionUserKey = 'auth_session_username';
+  static const _sessionPassKey = 'auth_session_password';
+    final encoded = jsonEncode(user.toJson());
+    await _preferences.setString(_blobKey, encoded);
+    await _preferences.setBool(_loggedInKey, true);
     try {
-      final payload = utf8.decode(
-        base64Url.decode(base64Url.normalize(parts[1])),
-      );
-      final decoded = jsonDecode(payload);
-      if (decoded is! Map) return false;
-      final exp = decoded['exp'];
-      if (exp is! num) return true;
-      final expiry = DateTime.fromMillisecondsSinceEpoch(
-        exp.toInt() * 1000,
-        isUtc: true,
-      );
-      return DateTime.now().toUtc().isBefore(
-        expiry.subtract(const Duration(seconds: 30)),
-      );
-    } catch (_) {
-      return false;
-    }
+      await _secure.write(key: _secureUserKey, value: encoded);
+    } catch (_) {}
+    if (_preferences.getBool(_loggedInKey) == false) return null;
+    String? secureValue;
+    try {
+      secureValue = await _secure.read(key: _secureUserKey);
+    } catch (_) {}
+    final user = _decode(secureValue) ??
+        _decode(_preferences.getString(_blobKey)) ??
+        await _migrateLegacySession();
+    if (_preferences.getBool(_loggedInKey) != true) {
+      await _preferences.setBool(_loggedInKey, true);
+      await _preferences.setString(_blobKey, jsonEncode(user.toJson()));
+    await _preferences.setBool(_loggedInKey, false);
+    await _preferences.remove(_blobKey);
+    await _preferences.remove(_sessionUserKey);
+    await _preferences.remove(_sessionPassKey);
+    try {
+      await _secure.delete(key: _secureUserKey);
+    } catch (_) {}
+  @override
+  Future<void> saveRememberedPassword(String password) async {
+    await _preferences.setString(_passwordKey, password);
+  }
+
+  @override
+  Future<void> clearRememberedPassword() async {
+    await _preferences.remove(_passwordKey);
+  }
+
+  @override
+  Future<String?> readRememberedPassword() async {
+    final password = _preferences.getString(_passwordKey);
+    if (password == null || password.isEmpty) return null;
+    return password;
+  }
+
+  @override
+  Future<void> saveSessionCredentials({
+    required String username,
+    required String password,
+  }) async {
+    await _preferences.setString(_sessionUserKey, username);
+    await _preferences.setString(_sessionPassKey, password);
+  }
+
+  @override
+  Future<({String username, String password})?> readSessionCredentials() async {
+    if (_preferences.getBool(_loggedInKey) == false) return null;
+    final username = _preferences.getString(_sessionUserKey) ?? '';
+    final password = _preferences.getString(_sessionPassKey) ?? '';
+    if (username.isEmpty || password.isEmpty) return null;
+    return (username: username, password: password);
+  }
+
+}
+
+/// A token stays usable until its expiry is known and already past.
+/// Decode failures do not sign the user out.
+bool authTokenUsable(String token) {
+  final parts = token.split('.');
+  if (parts.length != 3) return true;
+  try {
+    final payload = utf8.decode(
+      base64Url.decode(base64Url.normalize(parts[1])),
+    );
+    final decoded = jsonDecode(payload);
+    if (decoded is! Map) return true;
+    final exp = decoded['exp'];
+    final seconds = exp is num ? exp.toInt() : int.tryParse('$exp');
+    if (seconds == null) return true;
+    final expiry = DateTime.fromMillisecondsSinceEpoch(
+      seconds * 1000,
+      isUtc: true,
+    );
+    return DateTime.now().toUtc().isBefore(
+      expiry.subtract(const Duration(seconds: 30)),
+    );
+  } catch (_) {
+    return true;
   }
 }
