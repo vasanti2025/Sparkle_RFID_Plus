@@ -21,8 +21,11 @@ abstract final class AppConstants {
   static const quotationPageName = 'mob_quotation';
   static const orderPageName = 'new_custom_order';
 
-  /// Delivery challan layout. Switches to mob_deliverychallan when that page is published.
-  static const deliveryPageName = 'mob_inventory';
+  static const deliveryPageName = 'mob_delivery_chalan';
+  static const getAllDeliveryChallan = '/api/Invoice/GetAllDeliveryChallan';
+  static const addDeliveryChallan = '/api/Invoice/AddDeliveryChallan';
+  static const updateDeliveryChallan = '/api/Invoice/UpdateDeliveryChallan';
+  static const lastChallanNo = '/api/Invoice/GetLastChallanNo';
   static const getAllOrders = '/api/Order/GetAllOrders';
   static const addCustomOrder = '/api/Order/AddCustomOrder';
   static const updateCustomOrder = '/api/Order/UpdateCustomOrder';
@@ -33,8 +36,6 @@ abstract final class AppConstants {
   static const quotationListPageSize = 40;
   static const customerResultLimit = 40;
 
-  /// Sparkle frontend host. The delivery challan layout is loaded from here.
-  static const frontendBaseUrl = 'https://rrgold.loyalstring.co.in';
   static const loginPath = '/api/ClientOnboarding/ClientOnboardingLogin';
   static const rfidSyncPath = '/api/ProductMaster/GetAllRFID';
   static const addStockVerification =
