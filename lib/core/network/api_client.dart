@@ -45,10 +45,6 @@ class ApiClient {
   Future<http.Response> _send(
     String path,
     Object body,
-    Duration timeout,
-  ) async {
-    final uri = Uri.parse('${AppConstants.qaBaseUrl}$path');
-    Map<String, dynamic> body,
     Duration timeout, {
     String? baseUrl,
   }) async {

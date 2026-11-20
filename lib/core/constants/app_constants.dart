@@ -21,7 +21,6 @@ abstract final class AppConstants {
 
   static const quotationPageName = 'mob_quotation';
   static const orderPageName = 'mob_order';
-  static const orderPageName = 'new_custom_order';
 
   static const deliveryPageName = 'mob_delivery_chalan';
   static const getAllDeliveryChallan = '/api/Invoice/GetAllDeliveryChallan';

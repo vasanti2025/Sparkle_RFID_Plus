@@ -610,6 +610,7 @@ abstract final class AppStrings {
   static const keepEditing = 'Keep editing';
   static const discardChanges = 'Discard changes';
   static const customerName = 'Customer name';
+  static const chooseCustomer = 'Choose customer';
   static const useCustomer = 'Use customer';
   static const enterCustomerName = 'Enter the customer name.';
   static const addsNameDemo = 'Adds a name to this demo only.';

