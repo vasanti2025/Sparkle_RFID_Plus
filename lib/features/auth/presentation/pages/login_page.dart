@@ -44,9 +44,13 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _restoreUsername() async {
     if (!Injection.ready) return;
     final saved = await Injection.rememberedUsername();
+    final password = await Injection.rememberedUsername.password();
     if (!mounted || saved == null || saved.isEmpty) return;
     setState(() {
       _usernameController.text = saved;
+      if (password != null && password.isNotEmpty) {
+        _passwordController.text = password;
+      }
       _rememberUsername = true;
     });
   }

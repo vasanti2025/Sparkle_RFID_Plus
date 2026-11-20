@@ -6,4 +6,6 @@ class GetRememberedUsername {
   final AuthRepository repository;
 
   Future<String?> call() => repository.rememberedUsername();
+
+  Future<String?> password() => repository.rememberedPassword();
 }

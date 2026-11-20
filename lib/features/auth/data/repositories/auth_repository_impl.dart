@@ -27,10 +27,16 @@ class AuthRepositoryImpl implements AuthRepository {
         password: password,
       );
       await localDataSource.saveSession(user);
+      await localDataSource.saveSessionCredentials(
+        username: username,
+        password: password,
+      );
       if (rememberMe) {
         await localDataSource.saveRememberedUsername(username);
+        await localDataSource.saveRememberedPassword(password);
       } else {
         await localDataSource.clearRememberedUsername();
+        await localDataSource.clearRememberedPassword();
       }
       return Success(user);
     } on ServerException catch (error) {
@@ -48,8 +54,30 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<User?> restoreSession() {
-    return localDataSource.readSession();
+  Future<String?> rememberedPassword() {
+    return localDataSource.readRememberedPassword();
+  }
+
+  @override
+  Future<User?> restoreSession() async {
+    final user = await localDataSource.readSession();
+    if (user != null && authTokenUsable(user.token)) return user;
+    final saved = await localDataSource.readSessionCredentials();
+    if (saved == null) return user;
+    try {
+      final fresh = await remoteDataSource.login(
+        username: saved.username,
+        password: saved.password,
+      );
+      await localDataSource.saveSession(fresh);
+      await localDataSource.saveSessionCredentials(
+        username: saved.username,
+        password: saved.password,
+      );
+      return fresh;
+    } catch (_) {
+      return user;
+    }
   }
 
   @override

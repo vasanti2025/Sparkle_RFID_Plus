@@ -10,6 +10,8 @@ abstract class AuthRepository {
 
   Future<String?> rememberedUsername();
 
+  Future<String?> rememberedPassword();
+
   Future<User?> restoreSession();
 
   Future<void> signOut();
