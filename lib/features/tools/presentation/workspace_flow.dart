@@ -3,8 +3,10 @@ import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/di/injection.dart';
+import '../../../core/locale/feature_strings.dart';
 import '../../../core/session/app_session.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../rates/presentation/pages/todays_rate_page.dart';
 import '../../auth/presentation/pages/login_page.dart';
 import '../../find/presentation/pages/find_jewellery_page.dart';
 import '../../inventory/presentation/pages/inventory_page.dart';
@@ -82,6 +84,8 @@ void openSparkleModule(BuildContext context, String module, {bool replaceSheet =
       openPage(const DeliveryChallanPage());
     case AppStrings.reports:
       openPage(const StockReportPage());
+    case AppStrings.labelTodayRate:
+      openPage(const TodaysRatePage());
     case AppStrings.settings:
       openSheet(showSettingsSheet);
     default:
@@ -117,7 +121,7 @@ void showAllTools(BuildContext context) {
             children: [
               Icon(module.icon, size: 20, color: const Color(0xFF7B622F)),
               const SizedBox(width: 14),
-              Expanded(child: Text(module.name, style: _text(size: 13, weight: FontWeight.w600))),
+              Expanded(child: Text(_moduleLabel(module.name), style: _text(size: 13, weight: FontWeight.w600))),
               const Icon(Icons.chevron_right, size: 16, color: Color(0xFF8F897B)),
             ],
           ),
@@ -126,6 +130,11 @@ void showAllTools(BuildContext context) {
     );
   }
   _sheet(context, AppStrings.allToolsTitle, Column(children: children));
+}
+
+String _moduleLabel(String name) {
+  if (name == AppStrings.labelTodayRate) return tx('labelTodayRate', name);
+  return name;
 }
 
 void showModulePreview(BuildContext context, String module) {

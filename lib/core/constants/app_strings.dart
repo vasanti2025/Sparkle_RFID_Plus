@@ -787,6 +787,13 @@ abstract final class AppStrings {
   static const moduleEntryPreview = 'Module entry preview';
   static const backToWorkspace = 'Back to workspace';
   static const labelTodayRate = 'Label Today Rate';
+  static const todayRatePerGm = "Today's Rate / Gm";
+  static const updateRates = 'Update';
+  static const ratesUpdated = 'Rates updated successfully';
+  static const ratesUpdateFailed = 'Failed to update rates';
+  static const ratesLoadFailed = 'Could not load today\'s rates';
+  static const noRatesFound = 'No rates found';
+  static const signInForRates = 'Sign in to load today\'s rates.';
   static const deliveryChallan = 'Delivery challan';
   static const layoutCouldNotLoad = 'The form layout could not be loaded.';
   static const noFieldsOnPage = 'This page has no fields yet.';

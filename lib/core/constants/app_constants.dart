@@ -9,6 +9,7 @@ abstract final class AppConstants {
   static const getAllBranchMaster = '/api/ClientOnboarding/GetAllBranchMaster';
   static const getAllLabeledStock = '/api/ProductMaster/GetAllLabeledStock';
   static const getAllDailyRate = '/api/ProductMaster/GetAllDailyRate';
+  static const updateDailyRates = '/api/ProductMaster/UpdateDailyRates';
   static const getAllQuotation = '/api/Order/GetAllQuotation';
   static const addQuotation = '/api/Order/AddQuotation';
   static const updateQuotation = '/api/Order/UpdateQuotation';
