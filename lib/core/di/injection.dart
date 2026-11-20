@@ -17,6 +17,7 @@ import '../../features/settings/data/datasources/settings_local_data_source.dart
 import '../../features/settings/data/repositories/settings_repository_impl.dart';
 import '../../features/settings/presentation/settings_controller.dart';
 import '../network/api_client.dart';
+import '../network/api_host.dart';
 import '../../features/auth/domain/usecases/restore_session.dart';
 import '../../features/auth/domain/usecases/sign_out.dart';
 import '../../features/products/data/datasources/product_local_data_source.dart';
@@ -46,6 +47,7 @@ class Injection {
 
   static Future<void> init() async {
     final preferences = await SharedPreferences.getInstance();
+    await ApiHost.load();
     final remote = AuthRemoteDataSourceImpl();
     const secure = FlutterSecureStorage(
       aOptions: AndroidOptions(

@@ -838,6 +838,14 @@ abstract final class AppStrings {
   static const serverAddress = 'Server address';
   static const serverHint = 'https://your-server.example';
   static const saveConnection = 'Save connection';
+  static const configureCustomApi = 'Configure Custom API';
+  static const apiUrlAuthorizedMessage =
+      'Ensure the API URL belongs to an authorized server. Leave blank to use the default server.';
+  static const enterApiUrl = 'Enter API URL';
+  static const customApiUrlHint = 'http://192.168.6.9:8081';
+  static const customApiSaved = 'Custom API saved successfully';
+  static const defaultServerRestored = 'Default server restored';
+  static const invalidApiUrl = 'Enter a valid server address.';
   static const prototypeOnlyNetwork =
       'Prototype only. No network request will be made.';
   static const validHttps = 'Enter a valid HTTPS server address.';

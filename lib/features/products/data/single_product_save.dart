@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/network/api_host.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/session/app_session.dart';
 import '../presentation/demo/product_demo_session.dart';
@@ -175,7 +176,7 @@ Map<String, dynamic>? _sku(List<dynamic> rows, String sku, String vendor) {
 }
 
 Future<({String? error, String url})> _uploadImage(String clientCode, String itemCode, String filePath) async {
-  final request = http.MultipartRequest('POST', Uri.parse('${AppConstants.qaBaseUrl}${AppConstants.uploadProductImage}'));
+  final request = http.MultipartRequest('POST', Uri.parse('${ApiHost.base}${AppConstants.uploadProductImage}'));
   final token = AppSession.token.trim();
   if (token.isNotEmpty) request.headers['Authorization'] = 'Bearer $token';
   request.fields['ClientCode'] = clientCode;
@@ -211,7 +212,7 @@ Future<String?> _insert(Map<String, dynamic> payload) async {
   final token = AppSession.token.trim();
   final response = await http
       .post(
-        Uri.parse('${AppConstants.qaBaseUrl}${AppConstants.insertLabelledStock}'),
+        Uri.parse('${ApiHost.base}${AppConstants.insertLabelledStock}'),
         headers: {
           'Content-Type': 'application/json',
           if (token.isNotEmpty) 'Authorization': 'Bearer $token',
@@ -239,7 +240,7 @@ Future<List<dynamic>> _postList(String path, Map<String, dynamic> body) async {
   final token = AppSession.token.trim();
   final response = await http
       .post(
-        Uri.parse('${AppConstants.qaBaseUrl}$path'),
+        Uri.parse('${ApiHost.base}$path'),
         headers: {
           'Content-Type': 'application/json',
           if (token.isNotEmpty) 'Authorization': 'Bearer $token',

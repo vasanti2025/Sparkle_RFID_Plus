@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/network/configure_api_sheet.dart';
 import '../../../../core/constants/asset_paths.dart';
 import '../../../../core/di/injection.dart';
 import '../../../../core/rfid/scan_permissions.dart';
@@ -531,7 +532,7 @@ class _LoginPageState extends State<LoginPage> {
                       color: AppColors.fieldBorder,
                     ),
                     InkWell(
-                      onTap: () {},
+                      onTap: () => showConfigureApiSheet(context),
                       child: SizedBox(
                         height: AppTypography.minTouch,
                         child: Row(

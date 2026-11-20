@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/error/exceptions.dart';
+import '../../../../core/network/api_host.dart';
 import '../models/user_model.dart';
 
 abstract class AuthRemoteDataSource {
@@ -31,6 +32,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required String password,
   }) async {
     try {
+      _dio.options.baseUrl = ApiHost.base;
       final response = await _dio.post<dynamic>(
         AppConstants.loginPath,
         data: {'username': username, 'password': password},

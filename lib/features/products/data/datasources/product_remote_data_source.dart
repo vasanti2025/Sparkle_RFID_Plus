@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 
 import '../../../../core/constants/app_constants.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/network/api_host.dart';
 import '../../domain/entities/product_sync_progress.dart';
 
 abstract class ProductRemoteDataSource {
@@ -168,6 +169,7 @@ class ProductRemoteDataSourceImpl implements ProductRemoteDataSource {
     required void Function(int received, int total) onProgress,
   }) async {
     try {
+      _dio.options.baseUrl = ApiHost.base;
       await _dio.download(
         path,
         file.path,

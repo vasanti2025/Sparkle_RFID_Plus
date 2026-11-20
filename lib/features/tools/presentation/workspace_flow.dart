@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../../core/constants/app_strings.dart';
+import '../../../core/network/configure_api_sheet.dart';
 import '../../../core/di/injection.dart';
 import '../../../core/locale/feature_strings.dart';
 import '../../../core/session/app_session.dart';
@@ -403,11 +404,7 @@ void _connection(BuildContext context) {
   navigator.pop();
   WidgetsBinding.instance.addPostFrameCallback((_) {
     if (!navigator.mounted) return;
-    _sheet(
-      navigator.context,
-      AppStrings.connectionSettings,
-      const _ConnectionForm(),
-    );
+    showConfigureApiSheet(navigator.context);
   });
 }
 
@@ -424,67 +421,6 @@ Future<void> _signOut(BuildContext context) async {
     MaterialPageRoute<void>(builder: (_) => const LoginPage()),
     (_) => false,
   );
-}
-
-class _ConnectionForm extends StatefulWidget {
-  const _ConnectionForm();
-
-  @override
-  State<_ConnectionForm> createState() => _ConnectionFormState();
-}
-
-class _ConnectionFormState extends State<_ConnectionForm> {
-  final _server = TextEditingController();
-  String? _error;
-
-  @override
-  void dispose() {
-    _server.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    final uri = Uri.tryParse(_server.text.trim());
-    final good = uri != null && uri.scheme == 'https' && uri.host.isNotEmpty;
-    if (!good) {
-      setState(() => _error = AppStrings.validHttps);
-      return;
-    }
-    final messenger = ScaffoldMessenger.of(context);
-    Navigator.pop(context);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text(AppStrings.connectionAccepted)));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(AppStrings.serverAddressNote, style: _text(size: 13, color: const Color(0xFF6D6B66), height: 1.5)),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _server,
-          keyboardType: TextInputType.url,
-          decoration: InputDecoration(
-            labelText: AppStrings.serverAddress,
-            hintText: AppStrings.serverHint,
-            filled: true,
-            fillColor: AppColors.white,
-            errorText: _error,
-            border: _border(const Color(0xFFD5CBBC)),
-            enabledBorder: _border(const Color(0xFFD5CBBC)),
-            focusedBorder: _border(const Color(0xFF967431)),
-          ),
-        ),
-        const SizedBox(height: 14),
-        _primary(AppStrings.saveConnection, _save),
-        const SizedBox(height: 8),
-        Text(AppStrings.prototypeOnlyNetwork, style: _text(size: 11, color: const Color(0xFF817866))),
-      ],
-    );
-  }
 }
 
 Widget _symbol(IconData icon) {
@@ -561,13 +497,6 @@ void _sheet(BuildContext context, String title, Widget body) {
         ),
       );
     },
-  );
-}
-
-OutlineInputBorder _border(Color color) {
-  return OutlineInputBorder(
-    borderRadius: const BorderRadius.all(Radius.circular(10)),
-    borderSide: BorderSide(color: color),
   );
 }
 

@@ -2,9 +2,9 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../constants/app_constants.dart';
 import '../error/exceptions.dart';
 import '../session/app_session.dart';
+import 'api_host.dart';
 
 class ApiClient {
   ApiClient({http.Client? client}) : _client = client ?? http.Client();
@@ -48,7 +48,7 @@ class ApiClient {
     Duration timeout, {
     String? baseUrl,
   }) async {
-    final host = (baseUrl ?? AppConstants.qaBaseUrl).replaceAll(RegExp(r'/+$'), '');
+    final host = (baseUrl ?? ApiHost.base).replaceAll(RegExp(r'/+$'), '');
     final uri = Uri.parse('$host$path');
     try {
       final token = AppSession.token;
